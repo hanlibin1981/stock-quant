@@ -17,25 +17,27 @@ class IndicatorCalculator:
         # 默认计算的指标
         self.default_indicators = ['ma', 'ema', 'macd', 'rsi', 'kdj', 'boll', 'cci', 'wr']
     
-    def calculate(self, df: pd.DataFrame, indicators: List[str] = None) -> pd.DataFrame:
+    def calculate(self, df: pd.DataFrame, indicators: List[str] = None, copy: bool = False) -> pd.DataFrame:
         """
         计算技术指标
-        
+
         Args:
             df: 包含 OHLCV 数据的 DataFrame
             indicators: 指标列表，None 则计算默认全部指标
-        
+            copy: 是否复制DataFrame，默认为False以提高性能
+
         Returns:
             添加了指标列的 DataFrame
         """
         if df is None or df.empty:
             return df
-        
-        result = df.copy()
-        
+
+        # 避免不必要的复制，默认直接修改原DataFrame
+        result = df.copy() if copy else df
+
         if indicators is None:
             indicators = self.default_indicators
-        
+
         for indicator in indicators:
             if indicator.lower() == 'ma':
                 result = self._calc_ma(result)
@@ -57,7 +59,7 @@ class IndicatorCalculator:
                 result = self._calc_obv(result)
             elif indicator.lower() == 'wr':
                 result = self._calc_wr(result)
-        
+
         return result
     
     def _calc_ma(self, df: pd.DataFrame, periods: List[int] = [5, 10, 20, 60]) -> pd.DataFrame:
@@ -95,12 +97,10 @@ class IndicatorCalculator:
             gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
-            # 避免除零：当loss为0时（无亏损），RSI=100
-            rs = gain / loss.replace(0, np.nan)
-            df[f'rsi{period}'] = 100 - (100 / (1 + rs))
-            # 处理 inf 和 nan：无亏损时RSI应为100
-            df[f'rsi{period}'] = df[f'rsi{period}'].fillna(100)
-        
+            # 明确处理除零情况：当loss为0时（无亏损），RSI=100
+            rs = np.where(loss == 0, np.inf, gain / loss)
+            df[f'rsi{period}'] = np.where(rs == np.inf, 100, 100 - (100 / (1 + rs)))
+
         return df
     
     def _calc_kdj(self, df: pd.DataFrame) -> pd.DataFrame:

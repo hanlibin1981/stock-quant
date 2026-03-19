@@ -2,10 +2,13 @@
 东方财富 API 客户端
 """
 
+import re
+import time
 import requests
 import pandas as pd
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
+from functools import wraps
 import logging
 
 # 配置日志
@@ -13,12 +16,35 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _retry_on_error(max_retries: int = 3, delay: float = 0.5):
+    """网络请求重试装饰器"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    return func(self, *args, **kwargs)
+                except (requests.RequestException, ValueError, KeyError) as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        time.sleep(delay * (attempt + 1))  # 指数退避
+            logger.error(f"重试{max_retries}次后仍失败: {last_error}")
+            return None
+        return wrapper
+    return decorator
+
+
 class EastMoneyClient:
     """东方财富数据客户端"""
 
     BASE_URL = "https://push2.eastmoney.com"
 
-    def __init__(self):
+    # 股票代码正则: 6位数字，以0/3/6开头
+    STOCK_CODE_PATTERN = re.compile(r'^(0|3|6)\d{5}$')
+
+    def __init__(self, max_retries: int = 3):
+        self.max_retries = max_retries
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': '*/*',
@@ -28,25 +54,42 @@ class EastMoneyClient:
         # 使用session复用连接
         self.session = requests.Session()
         self.session.headers.update(self.headers)
+
+    def _validate_code(self, code: str) -> bool:
+        """验证股票代码格式"""
+        if not code or not isinstance(code, str):
+            return False
+        return bool(self.STOCK_CODE_PATTERN.match(code.strip()))
+
+    def _convert_secid(self, code: str) -> str:
+        """将股票代码转换为市场secid"""
+        if not self._validate_code(code):
+            raise ValueError(f"无效的股票代码: {code}")
+        if code.startswith('6'):
+            return f"1.{code}"  # 上海
+        elif code.startswith('0') or code.startswith('3'):
+            return f"0.{code}"  # 深圳
+        else:
+            raise ValueError(f"不支持的股票代码: {code}")
     
+    @_retry_on_error(max_retries=3, delay=0.5)
     def get_realtime(self, code: str) -> Optional[Dict]:
         """
         获取实时行情
-        
+
         Args:
             code: 股票代码 (如 000002)
-        
+
         Returns:
             行情字典
         """
-        # 确定市场代码
-        if code.startswith('6'):
-            secid = f"1.{code}"  # 上海
-        elif code.startswith('0') or code.startswith('3'):
-            secid = f"0.{code}"  # 深圳
-        else:
-            secid = f"0.{code}"
-        
+        # 验证并转换市场代码
+        try:
+            secid = self._convert_secid(code)
+        except ValueError as e:
+            logger.warning(f"{e}")
+            return None
+
         url = f"{self.BASE_URL}/api/qt/stock/get"
         params = {
             'secid': secid,
@@ -82,23 +125,25 @@ class EastMoneyClient:
 
         return None
     
+    @_retry_on_error(max_retries=3, delay=0.5)
     def get_kline(self, code: str, days: int = 250) -> Optional[pd.DataFrame]:
         """
         获取K线数据
-        
+
         Args:
             code: 股票代码
             days: 获取天数
-        
+
         Returns:
             DataFrame
         """
-        # 确定市场
-        if code.startswith('6'):
-            secid = f"1.{code}"
-        else:
-            secid = f"0.{code}"
-        
+        # 验证并转换市场
+        try:
+            secid = self._convert_secid(code)
+        except ValueError as e:
+            logger.warning(f"{e}")
+            return None
+
         url = f"{self.BASE_URL}/api/qt/stock/kline/get"
         params = {
             'secid': secid,
@@ -143,6 +188,7 @@ class EastMoneyClient:
 
         return None
     
+    @_retry_on_error(max_retries=3, delay=0.5)
     def search_stock(self, keyword: str) -> List[Dict]:
         """
         搜索股票

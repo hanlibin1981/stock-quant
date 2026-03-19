@@ -8,6 +8,7 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
+import threading
 
 
 @dataclass
@@ -509,12 +510,16 @@ class SignalGenerator:
         return {'indicator': 'VOL', 'signal': 'hold', 'reason': '量能正常', 'strength': 0}
 
 
-# 单例
+# 线程安全的单例
 _signal_generator = None
+_lock = threading.Lock()
+
 
 def get_signal_generator() -> SignalGenerator:
-    """获取信号生成器单例"""
+    """获取信号生成器单例（线程安全）"""
     global _signal_generator
     if _signal_generator is None:
-        _signal_generator = SignalGenerator()
+        with _lock:
+            if _signal_generator is None:
+                _signal_generator = SignalGenerator()
     return _signal_generator
