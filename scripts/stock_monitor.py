@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import requests
+from pathlib import Path
 from datetime import datetime
 
 # 飞书配置
@@ -22,10 +23,27 @@ WATCH_LIST = [
     ('600036', '招商银行'),
 ]
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SRC_ROOT = PROJECT_ROOT / 'src'
+ENV_FILE = PROJECT_ROOT / 'config' / 'production.env'
+
 # 添加项目路径
-sys.path.insert(0, '/Users/mac/openclaw-projects/stock-quant/src')
+sys.path.insert(0, str(SRC_ROOT))
 
 _cached_token = None
+
+
+def load_env_file():
+    """加载本地生产环境变量，确保脚本模式下也能读取 TUSHARE_TOKEN。"""
+    if not ENV_FILE.exists():
+        return
+
+    for raw_line in ENV_FILE.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        os.environ.setdefault(key.strip(), value.strip())
 
 def get_token():
     global _cached_token
@@ -61,20 +79,28 @@ def get_signal(code):
         
         # 获取实时价格
         realtime_price = None
+        realtime_source = None
         try:
             resp = tencent.get_realtime(code)
             if resp:
                 realtime_price = float(resp.get('price', 0))
+                realtime_source = 'tencent'
         except Exception as e:
             print(f"Error fetching realtime for {code}: {e}")
         
         df = None
+        kline_source = 'tushare'
         if tushare.is_available():
             df = tushare.get_kline(code, days=60)
         if df is None or (hasattr(df, 'empty') and df.empty):
             df = eastmoney.get_kline(code, days=60)
+            kline_source = 'eastmoney'
+        if df is None or (hasattr(df, 'empty') and df.empty):
+            df = tencent.get_kline(code, days=60)
+            kline_source = 'tencent'
         if df is None or (hasattr(df, 'empty') and df.empty):
             df = mock.generate_kline(code, days=60)
+            kline_source = 'mock'
         
         if df is None or (hasattr(df, 'empty') and df.empty):
             return None
@@ -94,6 +120,8 @@ def get_signal(code):
             'trend': result.get('trend', 'unknown'),
             'price': price,
             'realtime_price': realtime_price is not None,
+            'realtime_source': realtime_source or ('kline_close' if len(df) > 0 else None),
+            'kline_source': kline_source,
             'details': result.get('details', {})
         }
     except Exception as e:
@@ -195,6 +223,7 @@ def format_signal_message(signals, now_str):
     return msg
 
 def main():
+    load_env_file()
     print(f"[{datetime.now()}] 股票信号监控开始 (优化版)")
     
     if not is_trading_hours():
@@ -207,7 +236,10 @@ def main():
         if s:
             s['name'] = name
             signals.append(s)
-            print(f"{code} {name}: {s['signal']} - {s['reason']}")
+            print(
+                f"{code} {name}: {s['signal']} - {s['reason']} "
+                f"[kline={s.get('kline_source', 'unknown')}, price={s.get('realtime_source', 'unknown')}]"
+            )
     
     if not signals:
         print("无信号")

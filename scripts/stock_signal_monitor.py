@@ -11,9 +11,12 @@ import requests
 from datetime import datetime
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SRC_ROOT = PROJECT_ROOT / 'src'
+ENV_FILE = PROJECT_ROOT / 'config' / 'production.env'
+
 # 添加项目路径
-project_root = Path('/Users/mac/openclaw-projects/stock-quant')
-sys.path.insert(0, str(project_root / 'src'))
+sys.path.insert(0, str(SRC_ROOT))
 
 # 飞书配置 - 使用用户允许列表中的ID
 APP_ID = "cli_a933a6038e795cee"
@@ -26,6 +29,19 @@ WATCH_LIST = ['000002', '600519', '600036', '000858', '000001']
 # 缓存token
 _cached_token = None
 _token_expires_at = 0
+
+
+def load_env_file():
+    """加载本地生产环境变量，确保脚本模式下也能读取 TUSHARE_TOKEN。"""
+    if not ENV_FILE.exists():
+        return
+
+    for raw_line in ENV_FILE.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        os.environ.setdefault(key.strip(), value.strip())
 
 
 def get_tenant_access_token():
@@ -90,31 +106,44 @@ def get_stock_signal(code):
     from api.eastmoney import EastMoneyClient
     from api.tushare import get_tushare_client
     from api.mock_data import MockDataGenerator
+    from api.tencent import get_tencent_client
     from core.indicator import IndicatorCalculator
     from core.signal import get_signal_generator
     
     tushare = get_tushare_client()
     eastmoney = EastMoneyClient()
+    tencent = get_tencent_client()
     mock = MockDataGenerator()
     indicator = IndicatorCalculator()
     signal_gen = get_signal_generator()
     
     df = None
+    kline_source = 'tushare'
     if tushare.is_available():
         df = tushare.get_kline(code, days=60)
     if df is None or df.empty:
         df = eastmoney.get_kline(code, days=60)
+        kline_source = 'eastmoney'
+    if df is None or df.empty:
+        df = tencent.get_kline(code, days=60)
+        kline_source = 'tencent'
     if df is None or df.empty:
         df = mock.generate_kline(code, days=60)
+        kline_source = 'mock'
     if df is None or df.empty:
         return None
     
     df = indicator.calculate(df)
     result = signal_gen.analyze(df)
     
-    return {'code': code, 'signal': result.get('signal', 'hold'), 
-            'reason': result.get('reason', ''), 'strength': result.get('strength', 0),
-            'price': float(df.iloc[-1]['close']) if len(df) > 0 else 0}
+    return {
+        'code': code,
+        'signal': result.get('signal', 'hold'),
+        'reason': result.get('reason', ''),
+        'strength': result.get('strength', 0),
+        'price': float(df.iloc[-1]['close']) if len(df) > 0 else 0,
+        'kline_source': kline_source,
+    }
 
 
 def is_trading_day():
@@ -130,6 +159,7 @@ def is_trading_hours():
 
 
 def main():
+    load_env_file()
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 股票信号监控任务开始")
     
     if not is_trading_day():
@@ -146,7 +176,10 @@ def main():
             signal = get_stock_signal(code)
             if signal:
                 signals.append(signal)
-                print(f"股票 {code}: {signal['signal']} - {signal['reason']}")
+                print(
+                    f"股票 {code}: {signal['signal']} - {signal['reason']} "
+                    f"[kline={signal.get('kline_source', 'unknown')}]"
+                )
         except Exception as e:
             print(f"获取 {code} 信号失败: {e}")
     
