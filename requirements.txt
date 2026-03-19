@@ -5,7 +5,7 @@ numpy>=1.24.0
 requests>=2.31.0
 
 # Data storage
-sqlite3 (built-in)
+# sqlite3 is part of the Python standard library
 json5>=2.2.0
 
 # Technical analysis
