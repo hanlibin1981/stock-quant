@@ -1,5 +1,7 @@
 # StockQuant Pro
 
+[![CI](https://github.com/hanlibin1981/stock-quant/actions/workflows/ci.yml/badge.svg)](https://github.com/hanlibin1981/stock-quant/actions/workflows/ci.yml)
+
 股票量化交易与信号分析系统，包含数据获取、技术指标、策略回测、参数优化、滚动验证、信号监控和 Web 界面。
 
 ## 当前能力

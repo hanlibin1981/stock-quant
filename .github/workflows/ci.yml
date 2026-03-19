@@ -24,10 +24,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy requests python-dateutil flask
 
-      - name: Compile source
+      - name: Verify
         run: |
-          python -m py_compile src/ui/prod_server.py src/ui/web_app.py src/main.py scripts/stock_monitor.py scripts/stock_signal_monitor.py
-
-      - name: Run unit tests
-        run: |
-          python -m unittest tests.test_backtest_engine
+          make verify
