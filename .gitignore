@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.claude/
+
+venv/
+logs/
+dist/
+
+config/production.env
+
+.pytest_cache/
+.coverage
+htmlcov/

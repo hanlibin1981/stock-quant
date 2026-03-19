@@ -1,0 +1,22 @@
+# StockQuant Pro - 股票量化交易工具
+# Core dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+
+# Data storage
+sqlite3 (built-in)
+json5>=2.2.0
+
+# Technical analysis
+ta-lib; platform_system != 'Windows'
+
+# GUI (optional - for future desktop UI)
+# pyqt6>=6.5.0
+# pywebview>=4.4
+
+# Notifications
+plyer>=2.1.0
+
+# Date handling
+python-dateutil>=2.8.0

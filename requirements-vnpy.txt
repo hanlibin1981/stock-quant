@@ -1,0 +1,4 @@
+# VN.py 集成模块
+# 安装: pip install vnpy
+
+vnpy>=3.0.0
