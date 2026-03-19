@@ -1,180 +1,209 @@
 # StockQuant Pro
 
-股票量化交易工具 - 数据分析、策略回测、信号生成，支持与同花顺软件数据互通，集成VN.py实现实盘交易。
+股票量化交易与信号分析系统，包含数据获取、技术指标、策略回测、参数优化、滚动验证、信号监控和 Web 界面。
 
-## 功能特性
+## 当前能力
 
-### 📊 数据模块
-- 实时/历史行情获取（东方财富 + TuShare 双数据源）
-- 日线/周线/月线/分钟线数据支持
-- 数据本地 SQLite 存储与缓存
-- 同花顺数据导入（.otd / .h5 / .xlsx / .csv 格式）
-- TuShare 专业数据接口（需配置 Token）
-- 模拟数据后备（API不可用时）
+- 多数据源行情链路
+  - `TuShare`
+  - `EastMoney`
+  - `Tencent`
+  - `mock` 回退
+- 技术指标
+  - `MA / EMA / MACD / RSI / KDJ / BOLL / CCI / ATR / OBV / WR`
+- 回测与优化
+  - 手续费、印花税、滑点、仓位、最小交易单位
+  - 固定止损、止盈、移动止损、ATR 止损、分批止盈
+  - 参数优化
+  - `walk-forward` 滚动验证
+  - 成本敏感性分析
+  - 批量回测
+  - JSON / CSV 导出
+- 策略
+  - `multi_factor`
+  - `dual_ma`
+  - `macd`
+  - `breakout`
+  - `rsi`
+  - `boll_reversion`
+  - `turtle_breakout`
+  - `volume_breakout`
+- 交易信号
+  - 当前信号
+  - 指标详情
+  - 历史验证
+  - 最近信号复盘
+  - 数据来源透明展示
+- Web 部署
+  - Flask 页面
+  - macOS `launchd` 常驻服务
+  - 发布包构建与健康检查
 
-### 📈 分析模块
-- 常用技术指标：MA, EMA, MACD, RSI, KDJ, BOLL, CCI, ATR, OBV, WR
-- 自定义指标公式
-- 多股票对比分析
+## 环境要求
 
-### 🎯 策略模块
-- 经典策略模板：
-  - 双均线策略
-  - MACD 策略
-  - 突破策略
-  - RSI 策略
-- 策略回测引擎
-- 收益统计（收益率、夏普比率、最大回撤）
-
-### 🚀 实盘交易 (VN.py)
-- VN.py 交易框架集成
-- 支持 CTP/券商API
-- 订单管理（下单/撤单/持仓）
-- 账户资金查询
-
-### 🔔 交易信号
-- 买入/卖出信号生成
-- 信号记录与复盘
-
-### 🌐 Web 界面
-- 实时行情查看
-- 技术指标分析
-- 策略回测
-- K线数据浏览
+- Python 3.12+
+- macOS 或 Linux
+- 建议使用虚拟环境
 
 ## 安装
 
 ```bash
-cd ~/openclaw-projects/stock-quant
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
+pip install -r requirements-gui.txt
 ```
 
-## 使用方法
+## TuShare 配置
 
-### 获取股票实时行情
+项目中的 `TuShare` 客户端从环境变量 `TUSHARE_TOKEN` 读取 token。
+
+本地开发可以直接导出：
+
 ```bash
-python -m src.main fetch --code 000002
+export TUSHARE_TOKEN=your_token_here
 ```
 
-### 分析股票（计算指标）
+生产模式推荐写入：
+
 ```bash
-python -m src.main analyze --code 000002
+config/production.env
 ```
 
-### 运行回测
+示例文件见 [production.env.example](/Users/mac/openclaw-projects/stock-quant/config/production.env.example)。
+
+## 常用命令
+
+获取实时行情：
+
 ```bash
-python -m src.main backtest --code 000002 --strategy dual_ma
+./venv/bin/python -m src.main fetch --code 000002
 ```
 
-### 导入同花顺数据
+分析技术指标：
+
 ```bash
-python -m src.main import --file /path/to/data.csv
+./venv/bin/python -m src.main analyze --code 000002
 ```
 
-## 正式部署
+运行回测：
 
-### 本机生产启动
 ```bash
-cd ~/openclaw-projects/stock-quant
+./venv/bin/python -m src.main backtest --code 000002 --strategy multi_factor
+```
+
+参数优化：
+
+```bash
+./venv/bin/python -m src.main optimize --code 000002 --strategy multi_factor --metric balanced
+```
+
+滚动验证：
+
+```bash
+./venv/bin/python -m src.main walkforward --code 000002 --strategy multi_factor
+```
+
+成本敏感性分析：
+
+```bash
+./venv/bin/python -m src.main sensitivity --code 000002 --strategy dual_ma
+```
+
+批量回测：
+
+```bash
+./venv/bin/python -m src.main batchbacktest --codes 000001,000002,600036 --strategy multi_factor
+```
+
+## Web 界面
+
+开发方式启动：
+
+```bash
+./venv/bin/python -m src.ui.web_app
+```
+
+生产方式启动：
+
+```bash
 chmod +x scripts/run_production.sh
-STOCKQUANT_PORT=5004 ./scripts/run_production.sh
+./scripts/run_production.sh
 ```
 
-默认地址:
+默认生产地址：
+
 ```text
 http://127.0.0.1:5004
 ```
 
-### macOS launchd 常驻服务
+## 正式部署
+
+安装 `launchd` 常驻服务：
+
 ```bash
-cd ~/openclaw-projects/stock-quant
-mkdir -p logs
 chmod +x scripts/install_launchd_service.sh scripts/run_production.sh
 ./scripts/install_launchd_service.sh
 ```
 
-首次安装后可在 `config/production.env` 中统一管理端口和主机配置。
+常用命令：
 
-常用管理命令:
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.stockquant.web.plist
 launchctl load ~/Library/LaunchAgents/com.stockquant.web.plist
-tail -f ~/openclaw-projects/stock-quant/logs/stockquant.stdout.log
-tail -f ~/openclaw-projects/stock-quant/logs/stockquant.stderr.log
+tail -f logs/stockquant.stdout.log
+tail -f logs/stockquant.stderr.log
 ```
 
-### 构建策略
+## 构建与校验
 
-推荐使用下面的固定流程:
+推荐流程：
 
 ```bash
-cd ~/openclaw-projects/stock-quant
 make verify
 make build-release
 make install-service
 make healthcheck
 ```
 
-说明:
-- `make verify`: 运行语法检查和核心单元测试，确保发布前可用
-- `make build-release`: 生成 `dist/stockquant-<timestamp>.tar.gz` 发布包
-- `make install-service`: 渲染并安装 `launchd` 服务文件
-- `make healthcheck`: 验证生产服务接口是否正常响应
+说明：
 
-### Python 代码调用
+- `make verify`：语法检查与核心单元测试
+- `make build-release`：生成发布包
+- `make install-service`：安装 `launchd` 服务
+- `make healthcheck`：检查生产服务接口
 
-```python
-from src.main import StockQuantPro
+## GitHub Actions
 
-app = StockQuantPro()
+仓库已配置最小 CI，自动执行：
 
-# 获取实时行情
-data = app.fetch_realtime('000002')
-print(f"万科A现价: {data['price']}")
+- Python 语法检查
+- `tests.test_backtest_engine`
 
-# 获取历史数据
-df = app.get_stock_data('000002', start_date='20250101')
-
-# 计算指标
-df = app.calculate_indicators(df, ['ma', 'macd', 'rsi'])
-
-# 运行回测
-result = app.run_backtest(df, 'dual_ma', fast_ma=5, slow_ma=20)
-
-# 导入同花顺数据
-df = app.import_tonghuashun('/path/to/file.csv')
-```
+工作流文件见 [ci.yml](/Users/mac/openclaw-projects/stock-quant/.github/workflows/ci.yml)。
 
 ## 项目结构
 
-```
+```text
 stock-quant/
+├── config/                  # 环境配置
+├── deploy/                  # 部署模板
+├── scripts/                 # 构建、部署、监控脚本
 ├── src/
-│   ├── main.py                 # 主入口
-│   ├── core/                   # 核心引擎
-│   │   ├── data/              # 数据模块
-│   │   │   └── stock_data.py  # 数据管理器
-│   │   ├── indicator/         # 指标模块
-│   │   │   └── calculator.py  # 指标计算器
-│   │   ├── strategy/          # 策略模块
-│   │   │   └── strategy.py    # 策略引擎
-│   │   └── backtest/          # 回测模块
-│   │       └── backtest.py    # 回测引擎
-│   └── api/                   # 外部接口
-│       ├── eastmoney/         # 东方财富API
-│       └── tonghuashun/       # 同花顺兼容
-├── requirements.txt
-├── SPEC.md
+│   ├── api/                 # 数据源接入
+│   ├── core/                # 回测、指标、信号、策略核心
+│   ├── ui/                  # Flask Web 界面
+│   └── main.py              # CLI 入口
+├── tests/                   # 单元测试
+├── Makefile
 └── README.md
 ```
 
-## 待实现
+## 已知说明
 
-- [ ] 图形界面 (PyQt6)
-- [ ] 实盘交易对接
-- [ ] 策略参数优化
-- [ ] 更多数据源（新浪、腾讯）
-- [ ] 策略信号桌面通知
+- `requirements.txt` 中的 `sqlite3` 是 Python 内置模块，不需要额外安装系统包。
+- 没有可用外部数据源时，系统会自动回退到 `mock` 数据；Web 页面会显示当前数据来源。
+- 监控脚本会自动尝试加载 `config/production.env`，避免单独运行时丢失 `TUSHARE_TOKEN`。
 
 ## 许可证
 
