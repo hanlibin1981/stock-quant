@@ -160,7 +160,7 @@ def format_signal_message(signals, now_str):
     # 服务访问地址
     web_url = "http://192.168.31.9:5002"
     
-    msg = f"📊 股票信号监控 ({now_str})\n"
+    msg = f"📊 交易信号 ({now_str})\n"
     msg += "=" * 40 + "\n\n"
     
     for s in signals:
