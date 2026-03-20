@@ -6,10 +6,19 @@
 import pandas as pd
 import sqlite3
 import json
+import threading
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 import requests
 from typing import Optional
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 数据库写锁 (SQLite并发控制)
+_db_write_lock = threading.Lock()
 
 
 class StockDataManager:
@@ -78,24 +87,26 @@ class StockDataManager:
         return df
     
     def save_stock_data(self, code: str, df: pd.DataFrame):
-        """保存股票数据到本地"""
+        """保存股票数据到本地（线程安全）"""
         # 确保数据格式正确
         df_save = df.copy()
         df_save['code'] = code
         df_save['date'] = df_save['date'].astype(str)
 
-        with sqlite3.connect(self.db_path) as conn:
-            df_save.to_sql('daily_kline', conn, if_exists='append', index=False)
+        with _db_write_lock:
+            with sqlite3.connect(self.db_path) as conn:
+                df_save.to_sql('daily_kline', conn, if_exists='append', index=False)
     
     def save_stock_info(self, code: str, name: str, industry: str = None, market: str = "A股"):
-        """保存股票基本信息"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO stock_info (code, name, industry, market)
-                VALUES (?, ?, ?, ?)
-            """, (code, name, industry, market))
-            conn.commit()
+        """保存股票基本信息（线程安全）"""
+        with _db_write_lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO stock_info (code, name, industry, market)
+                    VALUES (?, ?, ?, ?)
+                """, (code, name, industry, market))
+                conn.commit()
     
     def get_stock_list(self, market: str = None) -> list:
         """获取股票列表"""

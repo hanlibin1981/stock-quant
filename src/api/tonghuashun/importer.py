@@ -5,9 +5,14 @@
 
 import pandas as pd
 import os
+import logging
 from pathlib import Path
 from typing import Optional, List, Dict
 import struct
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class TonghuashunImporter:
@@ -78,7 +83,8 @@ class TonghuashunImporter:
                     try:
                         date = struct.unpack('I', data[0:4])[0]
                         # ... 其他字段解析
-                    except:
+                    except (ValueError, KeyError) as e:
+                        logger.debug(f"字段解析跳过: {e}")
                         break
                 
                 if records:
@@ -138,7 +144,8 @@ class TonghuashunImporter:
                 try:
                     df = pd.read_csv(filepath, encoding=encoding)
                     return self._normalize_dataframe(df)
-                except:
+                except (ValueError, KeyError, TypeError) as e:
+                    logger.debug(f"数据处理跳过: {e}")
                     continue
             
             print("Failed to read CSV with common encodings")
@@ -159,9 +166,11 @@ class TonghuashunImporter:
                             df = pd.read_csv(filepath, encoding=encoding, sep=sep)
                             if len(df.columns) >= 6:  # 至少有 OHLCAV
                                 return self._normalize_dataframe(df)
-                        except:
+                        except (ValueError, KeyError) as e:
+                            logger.debug(f"数据解析跳过: {e}")
                             continue
-                except:
+                except (ValueError, KeyError, TypeError) as e:
+                    logger.debug(f"数据处理跳过: {e}")
                     continue
             
             print("Failed to parse TXT file")
@@ -214,8 +223,8 @@ class TonghuashunImporter:
         if 'date' in df.columns:
             try:
                 df['date'] = pd.to_datetime(df['date'])
-            except:
-                pass
+            except (ValueError, KeyError) as e:
+                logger.warning(f"日期转换失败: {e}")
         
         # 确保数值列是数值类型
         numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount']

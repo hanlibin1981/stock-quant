@@ -5,9 +5,15 @@ VN.py 交易接口集成
 
 import os
 import sys
+import logging
+import threading
 from pathlib import Path
 from typing import Optional, Dict, List
 from datetime import datetime
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -83,8 +89,8 @@ class VnpyClient:
                     'close_profit': account.close_profit,
                     'position_profit': account.position_profit,
                 }
-        except:
-            pass
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
+            logger.warning(f"数据获取失败: {e}")
         
         return None
     
@@ -103,8 +109,8 @@ class VnpyClient:
                 'price': p.price,
                 'pnl': p.pnl,
             } for p in positions]
-        except:
-            pass
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
+            logger.warning(f"数据获取失败: {e}")
         
         return []
     
@@ -163,7 +169,8 @@ class VnpyClient:
         try:
             self.gateway.cancel_order(order_id)
             return True
-        except:
+        except Exception as e:
+            logger.warning(f"撤单失败: {e}")
             return False
     
     def get_orders(self) -> List[Dict]:
@@ -183,8 +190,8 @@ class VnpyClient:
                 'status': o.status.value if hasattr(o.status, 'value') else str(o.status),
                 'time': o.time,
             } for o in orders]
-        except:
-            pass
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
+            logger.warning(f"数据获取失败: {e}")
         
         return []
     
@@ -204,15 +211,15 @@ class VnpyClient:
                 'volume': t.volume,
                 'time': t.time,
             } for t in trades]
-        except:
-            pass
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
+            logger.warning(f"数据获取失败: {e}")
         
         return []
 
 
 class StockVnpyClient(VnpyClient):
     """股票交易客户端 (继承自VnpyClient)"""
-    
+
     def __init__(self):
         super().__init__()
         self.gateway_name = 'stock'
@@ -227,23 +234,26 @@ class StockVnpyClient(VnpyClient):
             'close_profit': 0.0,
             'position_profit': 0.0,
         }
-    
+        self._lock = threading.Lock()
+
     def connect(self) -> bool:
         """连接股票交易接口（模拟模式）"""
-        print("Stock trading: Simulation mode")
+        logger.info("Stock trading: Simulation mode")
         self.connected = True
         return True
     
     def get_account(self):
         """获取模拟账户信息"""
         if self._simulate_mode and self.connected:
-            return self._mock_account.copy()
+            with self._lock:
+                return self._mock_account.copy()
         return None
-    
+
     def get_positions(self):
         """获取模拟持仓"""
         if self._simulate_mode and self.connected:
-            return self._mock_positions
+            with self._lock:
+                return self._mock_positions.copy()
         return []
     
     def send_order(self, symbol: str, direction: str, price: float, volume: int, order_type: str = 'limit') -> Optional[str]:
@@ -251,24 +261,25 @@ class StockVnpyClient(VnpyClient):
         if self._simulate_mode and self.connected:
             import uuid
             order_id = f"SIM_{uuid.uuid4().hex[:8]}"
-            
-            self._mock_orders.append({
-                'order_id': order_id,
-                'symbol': symbol,
-                'direction': direction,
-                'price': price,
-                'volume': volume,
-                'traded': 0,
-                'status': 'submitting',
-            })
-            
-            # 模拟成交
-            self._mock_orders[-1]['status'] = 'all_traded'
-            self._mock_orders[-1]['traded'] = volume
-            
-            # 更新持仓
-            self._update_mock_position(symbol, direction, price, volume)
-            
+
+            with self._lock:
+                self._mock_orders.append({
+                    'order_id': order_id,
+                    'symbol': symbol,
+                    'direction': direction,
+                    'price': price,
+                    'volume': volume,
+                    'traded': 0,
+                    'status': 'submitting',
+                })
+
+                # 模拟成交
+                self._mock_orders[-1]['status'] = 'all_traded'
+                self._mock_orders[-1]['traded'] = volume
+
+                # 更新持仓
+                self._update_mock_position(symbol, direction, price, volume)
+
             return order_id
         return None
     
@@ -296,16 +307,18 @@ class StockVnpyClient(VnpyClient):
     def get_orders(self):
         """获取模拟委托"""
         if self._simulate_mode and self.connected:
-            return self._mock_orders
+            with self._lock:
+                return self._mock_orders.copy()
         return []
-    
+
     def cancel_order(self, order_id: str) -> bool:
         """模拟撤单"""
         if self._simulate_mode and self.connected:
-            for order in self._mock_orders:
-                if order['order_id'] == order_id and order['status'] == 'submitting':
-                    order['status'] = 'cancelled'
-                    return True
+            with self._lock:
+                for order in self._mock_orders:
+                    if order['order_id'] == order_id and order['status'] == 'submitting':
+                        order['status'] = 'cancelled'
+                        return True
         return False
 
 

@@ -9,14 +9,18 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import threading
-import sys
-from pathlib import Path
 
-# 添加项目路径以导入指标计算器
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root / 'src'))
+# 延迟导入避免循环依赖
+_indicator_calc = None
 
-from core.indicator import IndicatorCalculator
+
+def _get_indicator_calculator():
+    """延迟加载指标计算器"""
+    global _indicator_calc
+    if _indicator_calc is None:
+        from src.core.indicator.calculator import IndicatorCalculator
+        _indicator_calc = IndicatorCalculator()
+    return _indicator_calc
 
 
 @dataclass
@@ -32,10 +36,17 @@ class TradeSignal:
 
 class SignalGenerator:
     """增强版信号生成器 - 支持多周期验证"""
-    
+
     def __init__(self):
         self.signal_history = []
-        self.indicator_calc = IndicatorCalculator()
+        self._indicator_calc = None
+
+    @property
+    def indicator_calc(self):
+        """延迟加载指标计算器"""
+        if self._indicator_calc is None:
+            self._indicator_calc = _get_indicator_calculator()
+        return self._indicator_calc
     
     def analyze(self, df: pd.DataFrame) -> Dict:
         """

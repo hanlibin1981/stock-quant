@@ -575,6 +575,8 @@ class BacktestEngine:
 
                     while shares > 0 and total_cost > cash:
                         shares -= lot_size
+                        if shares <= 0:
+                            break
                         gross_amount = shares * execution_price
                         commission = gross_amount * commission_rate
                         total_cost = gross_amount + commission

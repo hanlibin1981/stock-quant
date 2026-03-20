@@ -4,9 +4,31 @@ Web GUI 服务器
 """
 
 import sys
+import os
+import re
+import logging
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 股票代码正则: 6位数字，以0/3/6开头
+STOCK_CODE_PATTERN = re.compile(r'^(0|3|6)\d{5}$')
+
+
+def _validate_stock_code(code: str) -> bool:
+    """验证股票代码格式"""
+    if not code or not isinstance(code, str):
+        return False
+    return bool(STOCK_CODE_PATTERN.match(code.strip()))
+
+
+def _validate_strategy(strategy: str, valid_strategies: list) -> bool:
+    """验证策略名是否有效"""
+    return strategy in valid_strategies
 
 # 添加虚拟env site-packages 到路径
 venv_path = Path(__file__).parent.parent.parent / "venv" / "lib"
@@ -289,6 +311,12 @@ def get_kline():
     code = request.args.get('code', '000002')
     days = int(request.args.get('days', 60))
 
+    # 参数验证
+    if not _validate_stock_code(code):
+        return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
+    if days < 1 or days > 500:
+        return jsonify({'success': False, 'error': 'days必须在1-500之间'})
+
     # 优先使用 TuShare
     df = None
     source = 'tushare'
@@ -330,10 +358,20 @@ def get_indicators():
     """计算技术指标"""
     code = request.args.get('code', '000002')
     indicators = request.args.getlist('indicators')
-    
+
+    # 参数验证
+    if not _validate_stock_code(code):
+        return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
+
     if not indicators:
         indicators = ['ma', 'macd', 'rsi', 'boll']
-    
+
+    # 验证指标名称
+    valid_indicators = ['ma', 'ema', 'macd', 'rsi', 'kdj', 'boll', 'cci', 'atr', 'obv', 'wr']
+    for ind in indicators:
+        if ind not in valid_indicators:
+            return jsonify({'success': False, 'error': f'无效的指标: {ind}'})
+
     # 优先级: TuShare > 东方财富 > 腾讯财经 > 模拟
     df = None
     source = 'tushare'
@@ -373,7 +411,16 @@ def run_backtest():
     code = request.args.get('code', '000002')
     strategy = request.args.get('strategy', 'multi_factor')
     params = _parse_backtest_params(request.args)
-    
+
+    # 验证股票代码
+    if not _validate_stock_code(code):
+        return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
+
+    # 验证策略名
+    valid_strategies = strategy_engine.get_available_strategies()
+    if not _validate_strategy(strategy, valid_strategies):
+        return jsonify({'success': False, 'error': f'无效的策略: {strategy}'})
+
     df, source = _get_backtest_dataframe(code, days=250)
     
     if df is None or df.empty:
@@ -422,6 +469,19 @@ def optimize_backtest():
     param_ranges = _parse_optimize_param_ranges(request.args)
     constraints = _parse_optimize_constraints(request.args)
 
+    # 参数验证
+    if not _validate_stock_code(code):
+        return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
+
+    valid_strategies = strategy_engine.get_available_strategies()
+    if not _validate_strategy(strategy, valid_strategies):
+        return jsonify({'success': False, 'error': f'无效的策略: {strategy}'})
+
+    if top_n < 1 or top_n > 20:
+        return jsonify({'success': False, 'error': 'top_n必须在1-20之间'})
+    if max_evals < 1 or max_evals > 200:
+        return jsonify({'success': False, 'error': 'max_evals必须在1-200之间'})
+
     df, source = _get_backtest_dataframe(code, days=250)
     if df is None or df.empty:
         return jsonify({'success': False, 'error': '获取数据失败'})
@@ -452,6 +512,14 @@ def walkforward_backtest():
     param_ranges = _parse_optimize_param_ranges(request.args)
     constraints = _parse_optimize_constraints(request.args)
     walkforward_config = _parse_walkforward_config(request.args)
+
+    # 参数验证
+    if not _validate_stock_code(code):
+        return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
+
+    valid_strategies = strategy_engine.get_available_strategies()
+    if not _validate_strategy(strategy, valid_strategies):
+        return jsonify({'success': False, 'error': f'无效的策略: {strategy}'})
 
     df, source = _get_backtest_dataframe(code, days=500)
     if df is None or df.empty:
@@ -509,9 +577,13 @@ def import_data():
     """导入同花顺数据"""
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': '没有文件'})
-    
+
     file = request.files['file']
-    filepath = f"/tmp/{file.filename}"
+    # 防止路径遍历攻击
+    filename = os.path.basename(file.filename)
+    if not filename or '..' in filename or '/' in filename or '\\' in filename:
+        return jsonify({'success': False, 'error': '无效的文件名'})
+    filepath = f"/tmp/{filename}"
     file.save(filepath)
     
     df = tonghuashun_importer.import_file(filepath)
@@ -532,6 +604,17 @@ def search_stock():
     from urllib.parse import unquote
     keyword = request.args.get('keyword', '')
     keyword = unquote(keyword)  # URL解码
+
+    # 参数验证 - 限制关键词长度和内容
+    if not keyword:
+        return jsonify({'success': False, 'error': '关键词不能为空'})
+    if len(keyword) > 50:
+        return jsonify({'success': False, 'error': '关键词过长'})
+    # 允许中英文、数字和部分符号
+    import re
+    if not re.match(r'^[\w\u4e00-\u9fa5\s\.\-]+$', keyword):
+        return jsonify({'success': False, 'error': '关键词包含非法字符'})
+
     results = eastmoney_client.search_stock(keyword)
     return jsonify(results)
 
@@ -543,7 +626,13 @@ def get_signal():
     """获取交易信号"""
     code = request.args.get('code', '000002')
     days = int(request.args.get('days', 60))
-    
+
+    # 参数验证
+    if not _validate_stock_code(code):
+        return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
+    if days < 1 or days > 500:
+        return jsonify({'success': False, 'error': 'days必须在1-500之间'})
+
     # 获取K线数据
     df = None
     signal_source = 'tushare'
@@ -607,6 +696,12 @@ def get_signal_history():
     """获取历史信号"""
     code = request.args.get('code', '000002')
     days = int(request.args.get('days', 120))
+
+    # 参数验证
+    if not _validate_stock_code(code):
+        return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
+    if days < 1 or days > 1000:
+        return jsonify({'success': False, 'error': 'days必须在1-1000之间'})
 
     df = None
     source = 'tushare'
@@ -682,8 +777,8 @@ def get_monitor_signals():
                 resp = tencent_client.get_realtime(code)
                 if resp:
                     realtime_price = float(resp.get('price', 0))
-            except:
-                pass
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"获取实时价格失败: {e}")
             
             price = realtime_price if realtime_price else float(df.iloc[-1]['close']) if len(df) > 0 else 0
             
@@ -802,9 +897,18 @@ def trading_order():
     price = float(data.get('price', 0))
     volume = int(data.get('volume', 0))
     order_type = data.get('type', 'limit')  # limit/market
-    
-    if not symbol or volume <= 0:
-        return jsonify({'success': False, 'error': '参数错误'})
+
+    # 参数验证
+    if not symbol:
+        return jsonify({'success': False, 'error': '股票代码不能为空'})
+    if not _validate_stock_code(symbol):
+        return jsonify({'success': False, 'error': f'无效的股票代码: {symbol}'})
+    if direction not in ['long', 'short', 'buy', 'sell']:
+        return jsonify({'success': False, 'error': '无效的交易方向'})
+    if price <= 0:
+        return jsonify({'success': False, 'error': '价格必须大于0'})
+    if volume <= 0 or volume % 100 != 0:
+        return jsonify({'success': False, 'error': '数量必须是100的整数倍'})
     
     # 优先使用股票客户端
     order_id = stock_client.send_order(symbol, direction, price, volume, order_type)
@@ -824,7 +928,10 @@ def trading_order():
 def trading_cancel():
     """撤单"""
     order_id = request.json.get('order_id', '')
-    
+
+    if not order_id:
+        return jsonify({'success': False, 'error': '订单ID不能为空'})
+
     if stock_client.cancel_order(order_id) or vnpy_client.cancel_order(order_id) or mock_trade_client.cancel_order(order_id):
         return jsonify({'success': True})
     return jsonify({'success': False, 'error': '撤单失败'})
@@ -842,7 +949,7 @@ def run(host='0.0.0.0', port=5002):
     print(f"🚀 启动 StockQuant Pro Web UI")
     print(f"   本机访问: http://127.0.0.1:{port}")
     print(f"   局域网访问: http://192.168.31.9:{port}")
-    app.run(host=host, port=port, debug=True)
+    app.run(host=host, port=port, debug=os.getenv('FLASK_DEBUG', 'False').lower() == 'true')
 
 
 if __name__ == '__main__':
