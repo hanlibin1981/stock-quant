@@ -7,6 +7,7 @@ import sys
 import os
 import re
 import logging
+import tempfile
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -579,23 +580,33 @@ def import_data():
         return jsonify({'success': False, 'error': '没有文件'})
 
     file = request.files['file']
-    # 防止路径遍历攻击
+    # 防止路径遍历攻击 - 验证文件名
     filename = os.path.basename(file.filename)
     if not filename or '..' in filename or '/' in filename or '\\' in filename:
         return jsonify({'success': False, 'error': '无效的文件名'})
-    filepath = f"/tmp/{filename}"
-    file.save(filepath)
-    
-    df = tonghuashun_importer.import_file(filepath)
-    
-    if df is not None:
-        return jsonify({
-            'success': True,
-            'rows': len(df),
-            'columns': list(df.columns)
-        })
-    
-    return jsonify({'success': False, 'error': '导入失败'})
+
+    # 使用安全的临时目录
+    temp_dir = tempfile.mkdtemp(prefix='stockquant_import_')
+    filepath = os.path.join(temp_dir, filename)
+    try:
+        file.save(filepath)
+        df = tonghuashun_importer.import_file(filepath)
+
+        if df is not None:
+            return jsonify({
+                'success': True,
+                'rows': len(df),
+                'columns': list(df.columns)
+            })
+
+        return jsonify({'success': False, 'error': '导入失败'})
+    finally:
+        # 确保临时文件被清理
+        try:
+            os.remove(filepath)
+            os.rmdir(temp_dir)
+        except OSError:
+            pass
 
 
 @app.route('/api/search')

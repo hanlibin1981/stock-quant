@@ -5,8 +5,8 @@
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass, field
 from datetime import datetime
 import threading
 
@@ -24,14 +24,14 @@ def _get_indicator_calculator():
 
 
 @dataclass
-class TradeSignal:
-    """交易信号"""
+class EnhancedTradeSignal:
+    """增强版交易信号（用于 Web API）"""
     date: str
     signal: str  # 'buy', 'sell', 'hold'
     price: float
     reason: str
     strength: float = 0.0  # 信号强度 0-1
-    details: Dict = None  # 详细指标数据
+    details: Dict = field(default_factory=dict)  # 详细指标数据
 
 
 class SignalGenerator:
