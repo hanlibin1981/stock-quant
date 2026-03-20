@@ -1,6 +1,6 @@
 """
-交易信号模块 - 优化版
-增强信号生成，包含更多指标和验证
+交易信号模块 - 多周期验证版
+增强信号生成，支持多周期验证
 """
 
 import pandas as pd
@@ -9,6 +9,14 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import threading
+import sys
+from pathlib import Path
+
+# 添加项目路径以导入指标计算器
+project_root = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(project_root / 'src'))
+
+from core.indicator import IndicatorCalculator
 
 
 @dataclass
@@ -23,10 +31,11 @@ class TradeSignal:
 
 
 class SignalGenerator:
-    """增强版信号生成器"""
+    """增强版信号生成器 - 支持多周期验证"""
     
     def __init__(self):
         self.signal_history = []
+        self.indicator_calc = IndicatorCalculator()
     
     def analyze(self, df: pd.DataFrame) -> Dict:
         """
@@ -162,6 +171,112 @@ class SignalGenerator:
                 'trend': trend,
                 'details': details
             }
+
+    def analyze_multi_period(self, code: str, data_sources: Dict) -> Dict:
+        """
+        多周期分析 - 同时分析日线、周线、月线
+        
+        Args:
+            code: 股票代码
+            data_sources: 包含不同周期数据的字典
+                {'D': df日线, 'W': df周线, 'M': df月线}
+        
+        Returns:
+            多周期验证后的信号
+        """
+        period_results = {}
+        daily_signal = None
+        
+        # 各周期最小数据量要求
+        min_periods = {'D': 30, 'W': 15, 'M': 10}
+        
+        # 分析各周期
+        for period, df in data_sources.items():
+            min_required = min_periods.get(period, 20)
+            if df is not None and len(df) >= min_required:
+                # 计算指标
+                df_with_indicators = self.indicator_calc.calculate(df)
+                # 分析信号
+                result = self.analyze(df_with_indicators)
+                period_results[period] = {
+                    'signal': result.get('signal', 'hold'),
+                    'trend': result.get('trend', 'sideways'),
+                    'strength': result.get('strength', 0),
+                    'reason': result.get('reason', '')
+                }
+                if period == 'D':
+                    daily_signal = result
+        
+        if not period_results:
+            return {'signal': 'hold', 'reason': '无周期数据', 'strength': 0}
+        
+        # 多周期验证逻辑
+        signals = [p['signal'] for p in period_results.values()]
+        
+        # 统计各信号数量
+        buy_count = signals.count('buy')
+        sell_count = signals.count('sell')
+        
+        # 获取各周期趋势
+        trends = [p['trend'] for p in period_results.values()]
+        up_count = trends.count('up')
+        down_count = trends.count('down')
+        
+        # 综合判断
+        final_signal = 'hold'
+        final_reason = ''
+        confidence = 0.0
+        
+        # 1. 多周期信号一致时（2个及以上周期相同信号）
+        if buy_count >= 2:
+            final_signal = 'buy'
+            confidence = min(buy_count * 0.4, 1.0)
+            final_reason = f"多周期买入信号 ({buy_count}/{len(period_results)}周期)"
+        elif sell_count >= 2:
+            final_signal = 'sell'
+            confidence = min(sell_count * 0.4, 1.0)
+            final_reason = f"多周期卖出信号 ({sell_count}/{len(period_results)}周期)"
+        
+        # 2. 周线、月线趋势验证（趋势确认）
+        elif 'W' in period_results and 'M' in period_results:
+            w_trend = period_results['W'].get('trend', 'sideways')
+            m_trend = period_results['M'].get('trend', 'sideways')
+            
+            # 周线上涨 + 月线上涨 = 强烈买入
+            if w_trend == 'up' and m_trend == 'up':
+                final_signal = 'buy'
+                confidence = 0.85
+                final_reason = "周线月线同时上涨"
+            # 周线下跌 + 月线下跌 = 强烈卖出
+            elif w_trend == 'down' and m_trend == 'down':
+                final_signal = 'sell'
+                confidence = 0.85
+                final_reason = "周线月线同时下跌"
+        
+        # 3. 使用日线信号（单周期）
+        if final_signal == 'hold' and daily_signal:
+            daily_signal_val = daily_signal.get('signal', 'hold')
+            # 只有日线信号较强时才采纳
+            if daily_signal_val in ['buy', 'sell'] and daily_signal.get('strength', 0) > 0.5:
+                final_signal = daily_signal_val
+                confidence = daily_signal.get('strength', 0) * 0.5
+                final_reason = f"日线单周期信号 ({daily_signal.get('reason', '')})"
+        
+        # 4. 如果趋势相反，降低信号强度
+        if final_signal == 'buy' and down_count >= 2:
+            confidence *= 0.5
+            final_reason += " (但中长期趋势向下)"
+        elif final_signal == 'sell' and up_count >= 2:
+            confidence *= 0.5
+            final_reason += " (但中长期趋势向上)"
+        
+        return {
+            'signal': final_signal,
+            'reason': final_reason,
+            'strength': confidence,
+            'period_results': period_results,
+            'daily_signal': daily_signal
+        }
 
     def validate_signal_history(self, df: pd.DataFrame, horizons: List[int] = None) -> Dict:
         """基于历史滚动窗口验证当前信号逻辑的后续表现"""

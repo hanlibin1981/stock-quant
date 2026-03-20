@@ -11,12 +11,9 @@ import requests
 from datetime import datetime
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SRC_ROOT = PROJECT_ROOT / 'src'
-ENV_FILE = PROJECT_ROOT / 'config' / 'production.env'
-
 # 添加项目路径
-sys.path.insert(0, str(SRC_ROOT))
+project_root = Path('/Users/mac/openclaw-projects/stock-quant')
+sys.path.insert(0, str(project_root / 'src'))
 
 # 飞书配置 - 使用用户允许列表中的ID
 APP_ID = "cli_a933a6038e795cee"
@@ -29,19 +26,6 @@ WATCH_LIST = ['000002', '600519', '600036', '000858', '000001']
 # 缓存token
 _cached_token = None
 _token_expires_at = 0
-
-
-def load_env_file():
-    """加载本地生产环境变量，确保脚本模式下也能读取 TUSHARE_TOKEN。"""
-    if not ENV_FILE.exists():
-        return
-
-    for raw_line in ENV_FILE.read_text(encoding='utf-8').splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith('#') or '=' not in line:
-            continue
-        key, value = line.split('=', 1)
-        os.environ.setdefault(key.strip(), value.strip())
 
 
 def get_tenant_access_token():
@@ -102,47 +86,73 @@ def send_feishu_message(token, message):
 
 
 def get_stock_signal(code):
-    """获取股票信号"""
+    """获取股票信号 - 多周期验证版"""
     from api.eastmoney import EastMoneyClient
     from api.tushare import get_tushare_client
     from api.mock_data import MockDataGenerator
-    from api.tencent import get_tencent_client
     from core.indicator import IndicatorCalculator
     from core.signal import get_signal_generator
     
     tushare = get_tushare_client()
     eastmoney = EastMoneyClient()
-    tencent = get_tencent_client()
     mock = MockDataGenerator()
     indicator = IndicatorCalculator()
     signal_gen = get_signal_generator()
     
-    df = None
-    kline_source = 'tushare'
+    # 获取各周期数据
+    data_sources = {}
+    
+    # 日线 (D) - 60天
+    df_daily = None
     if tushare.is_available():
-        df = tushare.get_kline(code, days=60)
-    if df is None or df.empty:
-        df = eastmoney.get_kline(code, days=60)
-        kline_source = 'eastmoney'
-    if df is None or df.empty:
-        df = tencent.get_kline(code, days=60)
-        kline_source = 'tencent'
-    if df is None or df.empty:
-        df = mock.generate_kline(code, days=60)
-        kline_source = 'mock'
-    if df is None or df.empty:
+        df_daily = tushare.get_kline(code, days=60, ktype='D')
+    if df_daily is None or df_daily.empty:
+        df_daily = eastmoney.get_kline(code, days=60)
+    if df_daily is None or df_daily.empty:
+        df_daily = mock.generate_kline(code, days=60)
+    if df_daily is not None and not df_daily.empty:
+        data_sources['D'] = df_daily
+    
+    # 周线 (W) - 40周
+    if tushare.is_available():
+        df_weekly = tushare.get_kline(code, days=280, ktype='W')
+        if df_weekly is not None and not df_weekly.empty:
+            data_sources['W'] = df_weekly
+    
+    # 月线 (M) - 24月
+    if tushare.is_available():
+        df_monthly = tushare.get_kline(code, days=720, ktype='M')
+        if df_monthly is not None and not df_monthly.empty:
+            data_sources['M'] = df_monthly
+    
+    if not data_sources:
         return None
     
-    df = indicator.calculate(df)
-    result = signal_gen.analyze(df)
+    # 多周期分析
+    if len(data_sources) > 1:
+        # 多周期验证
+        result = signal_gen.analyze_multi_period(code, data_sources)
+        # 标记是否为多周期信号
+        is_multi = len(data_sources) > 1
+    else:
+        # 单周期分析
+        df = indicator.calculate(data_sources.get('D', list(data_sources.values())[0]))
+        result = signal_gen.analyze(df)
+        is_multi = False
+    
+    # 获取当前价格
+    price = 0
+    if 'D' in data_sources:
+        price = float(data_sources['D'].iloc[-1]['close']) if len(data_sources['D']) > 0 else 0
     
     return {
-        'code': code,
-        'signal': result.get('signal', 'hold'),
-        'reason': result.get('reason', ''),
+        'code': code, 
+        'signal': result.get('signal', 'hold'), 
+        'reason': result.get('reason', ''), 
         'strength': result.get('strength', 0),
-        'price': float(df.iloc[-1]['close']) if len(df) > 0 else 0,
-        'kline_source': kline_source,
+        'price': price,
+        'is_multi_period': is_multi,
+        'period_results': result.get('period_results', {})
     }
 
 
@@ -159,7 +169,6 @@ def is_trading_hours():
 
 
 def main():
-    load_env_file()
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 股票信号监控任务开始")
     
     if not is_trading_day():
@@ -176,10 +185,7 @@ def main():
             signal = get_stock_signal(code)
             if signal:
                 signals.append(signal)
-                print(
-                    f"股票 {code}: {signal['signal']} - {signal['reason']} "
-                    f"[kline={signal.get('kline_source', 'unknown')}]"
-                )
+                print(f"股票 {code}: {signal['signal']} - {signal['reason']}")
         except Exception as e:
             print(f"获取 {code} 信号失败: {e}")
     
@@ -188,13 +194,32 @@ def main():
         return
     
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    message = f"📈 股票信号播报 ({now})\n\n"
+    
+    # 检查是否有任何多周期信号
+    has_multi = any(s.get('is_multi_period', False) for s in signals)
+    title = "📈 多周期验证信号播报" if has_multi else "📈 股票信号播报"
+    message = f"{title} ({now})\n\n"
     
     for s in signals:
         emoji = "🟢" if s['signal'] == 'buy' else "🔴" if s['signal'] == 'sell' else "➡️"
         signal_text = "买入" if s['signal'] == 'buy' else "卖出" if s['signal'] == 'sell' else "观望"
-        message += f"{emoji} {s['code']}: {signal_text} (强度:{s['strength']*100:.0f}%)\n"
+        
+        # 多周期标记
+        multi_tag = " [多周期✅]" if s.get('is_multi_period', False) else ""
+        
+        message += f"{emoji} {s['code']}: {signal_text}{multi_tag} (强度:{s['strength']*100:.0f}%)\n"
         message += f"   原因: {s['reason']}\n"
+        
+        # 显示各周期信号
+        if s.get('period_results'):
+            periods = []
+            for p, r in s['period_results'].items():
+                p_name = {'D': '日', 'W': '周', 'M': '月'}.get(p, p)
+                p_signal = {'buy': '↑', 'sell': '↓', 'hold': '→'}.get(r['signal'], '?')
+                p_trend = {'up': '↗', 'down': '↘', 'sideways': '→'}.get(r['trend'], '?')
+                periods.append(f"{p_name}{p_signal}{p_trend}")
+            message += f"   周期: {' '.join(periods)}\n"
+        
         message += f"   现价: ¥{s['price']:.2f}\n\n"
     
     print("\n发送消息到飞书...")

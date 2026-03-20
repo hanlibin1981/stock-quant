@@ -82,7 +82,7 @@ class TushareClient:
 
         Args:
             code: 股票代码
-            days: 天数
+            days: 天数 (日线=天数，周线=周数，月线=月数)
             ktype: K线类型 D/W/M (日/周/月)
         """
         if not self.pro:
@@ -93,14 +93,38 @@ class TushareClient:
 
             # 计算日期范围
             from datetime import datetime, timedelta
+            
+            # 根据周期类型调整日期范围
+            if ktype == 'W':
+                days = days * 7  # 周线需要更多天数
+            elif ktype == 'M':
+                days = days * 30  # 月线需要更多天数
+            
             end_date = datetime.now().strftime('%Y%m%d')
             start_date = (datetime.now() - timedelta(days=days+30)).strftime('%Y%m%d')
 
-            df = self.pro.daily(
-                ts_code=ts_code,
-                start_date=start_date,
-                end_date=end_date
-            )
+            # 根据周期类型获取数据
+            if ktype == 'W':
+                # 周线数据
+                df = self.pro.weekly(
+                    ts_code=ts_code,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+            elif ktype == 'M':
+                # 月线数据
+                df = self.pro.monthly(
+                    ts_code=ts_code,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+            else:
+                # 日线数据
+                df = self.pro.daily(
+                    ts_code=ts_code,
+                    start_date=start_date,
+                    end_date=end_date
+                )
 
             if df is not None and not df.empty:
                 # 转换列名
@@ -116,7 +140,7 @@ class TushareClient:
                 # 按日期排序
                 df = df.sort_values('date')
 
-                # 只返回最近的天数
+                # 只返回最近的天数/周数/月数
                 df = df.tail(days)
 
                 return df[['date', 'open', 'close', 'high', 'low', 'volume', 'amount']]
