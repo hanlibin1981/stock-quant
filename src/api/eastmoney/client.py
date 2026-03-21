@@ -9,11 +9,10 @@ import pandas as pd
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
 from functools import wraps
-import logging
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def _retry_on_error(max_retries: int = 3, delay: float = 0.5):
@@ -150,7 +149,7 @@ class EastMoneyClient:
             'fields1': 'f1,f2,f3,f4,f5,f6',
             'fields2': 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61',
             'klt': 101,  # 日K
-            'fqt': 0,    # 不复权
+            'fqt': 1,    # 前复权（避免除权除息失真）
             'beg': (datetime.now() - timedelta(days=days)).strftime('%Y%m%d'),
             'end': datetime.now().strftime('%Y%m%d')
         }
@@ -164,18 +163,39 @@ class EastMoneyClient:
                 klines = data['data']['klines']
 
                 records = []
+                invalid_count = 0
                 for kline in klines:
                     parts = kline.split(',')
                     if len(parts) >= 6:
+                        open_price = float(parts[1])
+                        close_price = float(parts[2])
+                        high_price = float(parts[3])
+                        low_price = float(parts[4])
+
+                        # 数据校验：high >= low 且价格在合理范围内
+                        if high_price < low_price:
+                            invalid_count += 1
+                            continue
+                        if high_price < max(open_price, close_price) or low_price > min(open_price, close_price):
+                            # 开盘价和收盘价应该在高低价之间
+                            invalid_count += 1
+                            continue
+                        if high_price <= 0 or low_price <= 0:
+                            invalid_count += 1
+                            continue
+
                         records.append({
                             'date': parts[0],
-                            'open': float(parts[1]),
-                            'close': float(parts[2]),
-                            'high': float(parts[3]),
-                            'low': float(parts[4]),
+                            'open': open_price,
+                            'close': close_price,
+                            'high': high_price,
+                            'low': low_price,
                             'volume': float(parts[5]),
                             'amount': float(parts[6]) if len(parts) > 6 else 0
                         })
+
+                if invalid_count > 0:
+                    logger.warning(f"过滤了 {invalid_count} 条异常K线数据")
 
                 df = pd.DataFrame(records)
                 df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')

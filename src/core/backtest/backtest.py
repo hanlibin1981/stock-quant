@@ -23,6 +23,8 @@ class BacktestResult:
     annual_return: float
     max_drawdown: float
     sharpe_ratio: float
+    sortino_ratio: float
+    calmar_ratio: float
     avg_profit: float
     avg_loss: float
     profit_factor: float
@@ -90,7 +92,7 @@ class BacktestEngine:
         constraints: Dict = None,
         metric: str = "total_return",
         top_n: int = 5,
-        max_evals: int = 50,
+        max_evals: int = 200,
     ) -> Dict:
         """使用默认参数网格做简单参数搜索"""
         from src.core.strategy.strategy import StrategyEngine
@@ -164,6 +166,8 @@ class BacktestEngine:
                         "total_return": metrics.total_return,
                         "annual_return": metrics.annual_return,
                         "sharpe_ratio": metrics.sharpe_ratio,
+                        "sortino_ratio": metrics.sortino_ratio,
+                        "calmar_ratio": metrics.calmar_ratio,
                         "max_drawdown": metrics.max_drawdown,
                         "win_rate": metrics.win_rate,
                         "profit_factor": metrics.profit_factor,
@@ -266,6 +270,8 @@ class BacktestEngine:
                     "annual_return": segment_metrics.annual_return,
                     "max_drawdown": segment_metrics.max_drawdown,
                     "sharpe_ratio": segment_metrics.sharpe_ratio,
+                    "sortino_ratio": segment_metrics.sortino_ratio,
+                    "calmar_ratio": segment_metrics.calmar_ratio,
                     "end_capital": segment_metrics.end_capital,
                     "total_trades": segment_metrics.total_trades,
                     "excess_return": segment_metrics.total_return - segment_benchmark_metrics["total_return"],
@@ -341,6 +347,8 @@ class BacktestEngine:
                     "annual_return": metrics.annual_return,
                     "max_drawdown": metrics.max_drawdown,
                     "sharpe_ratio": metrics.sharpe_ratio,
+                    "sortino_ratio": metrics.sortino_ratio,
+                    "calmar_ratio": metrics.calmar_ratio,
                     "profit_factor": metrics.profit_factor,
                     "end_capital": metrics.end_capital,
                     "total_trades": metrics.total_trades,
@@ -728,6 +736,8 @@ class BacktestEngine:
                 annual_return=0,
                 max_drawdown=0,
                 sharpe_ratio=0,
+                sortino_ratio=0,
+                calmar_ratio=0,
                 avg_profit=0,
                 avg_loss=0,
                 profit_factor=0,
@@ -758,8 +768,21 @@ class BacktestEngine:
         daily_returns = equity_series.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
         if len(daily_returns) > 1 and daily_returns.std(ddof=0) > 0:
             sharpe_ratio = float((daily_returns.mean() / daily_returns.std(ddof=0)) * np.sqrt(252))
+            # Sortino: only downside deviation
+            negative_returns = daily_returns[daily_returns < 0]
+            if len(negative_returns) > 1 and negative_returns.std(ddof=0) > 0:
+                sortino_ratio = float((daily_returns.mean() / negative_returns.std(ddof=0)) * np.sqrt(252))
+            else:
+                sortino_ratio = 0.0
         else:
             sharpe_ratio = 0.0
+            sortino_ratio = 0.0
+        
+        # Calmar: annual_return / max_drawdown
+        if max_drawdown > 0.01:
+            calmar_ratio = float(annual_return / max_drawdown)
+        else:
+            calmar_ratio = 0.0
 
         profits = [t["profit"] for t in trades if t["profit"] > 0]
         losses = [t["profit"] for t in trades if t["profit"] <= 0]
@@ -779,6 +802,8 @@ class BacktestEngine:
             annual_return=annual_return,
             max_drawdown=max_drawdown,
             sharpe_ratio=sharpe_ratio,
+            sortino_ratio=sortino_ratio,
+            calmar_ratio=calmar_ratio,
             avg_profit=avg_profit,
             avg_loss=avg_loss,
             profit_factor=profit_factor,
@@ -921,6 +946,8 @@ class BacktestEngine:
         print(f"期末资金: {metrics.end_capital:.2f}")
         print(f"最大回撤: {metrics.max_drawdown:.2f}%")
         print(f"夏普比率: {metrics.sharpe_ratio:.2f}")
+        print(f"索提诺比率: {metrics.sortino_ratio:.2f}")
+        print(f"卡玛比率: {metrics.calmar_ratio:.2f}")
         print(f"平均盈利: {metrics.avg_profit:.2f}")
         print(f"平均亏损: {metrics.avg_loss:.2f}")
         print(f"盈亏比: {metrics.profit_factor:.2f}")

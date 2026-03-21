@@ -13,9 +13,9 @@ from datetime import datetime, timedelta
 import requests
 from typing import Optional
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 数据库写锁 (SQLite并发控制)
 _db_write_lock = threading.Lock()
@@ -30,35 +30,64 @@ class StockDataManager:
         self._init_db()
     
     def _init_db(self):
-        """初始化数据库"""
+        """初始化数据库（带版本迁移）"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
 
-            # 股票日线数据表
+            # Schema 版本表
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS daily_kline (
-                    code TEXT,
-                    date TEXT,
-                    open REAL,
-                    high REAL,
-                    low REAL,
-                    close REAL,
-                    volume REAL,
-                    amount REAL,
-                    PRIMARY KEY (code, date)
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT
                 )
             """)
 
-            # 股票基本信息表
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS stock_info (
-                    code TEXT PRIMARY KEY,
-                    name TEXT,
-                    industry TEXT,
-                    market TEXT,
-                    list_date TEXT
-                )
-            """)
+            # 获取当前版本
+            cursor.execute("SELECT MAX(version) FROM schema_version")
+            current_version = cursor.fetchone()[0] or 0
+
+            migrations = [
+                # Version 1: 初始版本
+                {
+                    "version": 1,
+                    "sql": [
+                        """
+                        CREATE TABLE IF NOT EXISTS daily_kline (
+                            code TEXT,
+                            date TEXT,
+                            open REAL,
+                            high REAL,
+                            low REAL,
+                            close REAL,
+                            volume REAL,
+                            amount REAL,
+                            PRIMARY KEY (code, date)
+                        )
+                        """,
+                        """
+                        CREATE TABLE IF NOT EXISTS stock_info (
+                            code TEXT PRIMARY KEY,
+                            name TEXT,
+                            industry TEXT,
+                            market TEXT,
+                            list_date TEXT
+                        )
+                        """,
+                    ]
+                },
+            ]
+
+            for migration in migrations:
+                v = migration["version"]
+                if v > current_version:
+                    for sql in migration["sql"]:
+                        cursor.execute(sql)
+                    cursor.execute(
+                        "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+                        (v, datetime.now().isoformat())
+                    )
+                    logger.info(f"数据库迁移 v{v} 完成")
+                    current_version = v
 
             conn.commit()
     
@@ -93,9 +122,28 @@ class StockDataManager:
         df_save['code'] = code
         df_save['date'] = df_save['date'].astype(str)
 
+        if df_save.empty:
+            return
+
+        columns = ['code', 'date', 'open', 'high', 'low', 'close', 'volume', 'amount']
+        records = df_save[columns].to_dict('records')
+        rows = []
+        for record in records:
+            row = []
+            for col in columns:
+                value = record.get(col)
+                row.append(None if pd.isna(value) else value)
+            rows.append(tuple(row))
+
+        insert_sql = """
+            INSERT OR REPLACE INTO daily_kline (code, date, open, high, low, close, volume, amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
         with _db_write_lock:
             with sqlite3.connect(self.db_path) as conn:
-                df_save.to_sql('daily_kline', conn, if_exists='append', index=False)
+                cursor = conn.cursor()
+                cursor.executemany(insert_sql, rows)
+                conn.commit()
     
     def save_stock_info(self, code: str, name: str, industry: str = None, market: str = "A股"):
         """保存股票基本信息（线程安全）"""

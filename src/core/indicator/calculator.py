@@ -14,7 +14,7 @@ class IndicatorCalculator:
         self.supported_indicators = [
             'ma', 'ema', 'macd', 'rsi', 'kdj', 'boll', 'cci', 'atr', 'obv', 'wr'
         ]
-        # 默认计算的指标
+        # 默认计算的指标（ma 会计算 5/10/20/60 四条均线）
         self.default_indicators = ['ma', 'ema', 'macd', 'rsi', 'kdj', 'boll', 'cci', 'wr']
     
     def calculate(self, df: pd.DataFrame, indicators: List[str] = None, copy: bool = False) -> pd.DataFrame:

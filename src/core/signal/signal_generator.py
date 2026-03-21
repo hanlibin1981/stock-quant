@@ -61,6 +61,34 @@ class SignalGenerator:
         if df is None or len(df) < 30:
             return {'signal': 'hold', 'reason': '数据不足', 'strength': 0}
         
+        # 自动计算缺失的指标（避免重复计算导致的数值不一致）
+        indicators_to_calc = []
+        required = ['macd_dif', 'rsi12', 'kdj_k', 'boll_upper', 'ma5', 'cci', 'wr6']
+        for ind in required:
+            if ind not in df.columns:
+                indicators_to_calc.append(ind)
+        
+        if indicators_to_calc:
+            # 只计算缺失的指标，避免重复
+            calc_needed = []
+            if any(ind in indicators_to_calc for ind in ['macd_dif']):
+                calc_needed.extend(['macd'])
+            if any(ind in indicators_to_calc for ind in ['rsi12']):
+                calc_needed.extend(['rsi'])
+            if any(ind in indicators_to_calc for ind in ['kdj_k']):
+                calc_needed.extend(['kdj'])
+            if any(ind in indicators_to_calc for ind in ['boll_upper']):
+                calc_needed.extend(['boll'])
+            if any(ind in indicators_to_calc for ind in ['ma5']):
+                calc_needed.extend(['ma'])
+            if any(ind in indicators_to_calc for ind in ['cci']):
+                calc_needed.extend(['cci'])
+            if any(ind in indicators_to_calc for ind in ['wr6']):
+                calc_needed.extend(['wr'])
+            
+            if calc_needed:
+                df = self.indicator_calc.calculate(df, indicators=list(set(calc_needed)))
+        
         latest = df.iloc[-1]
         prev = df.iloc[-2] if len(df) > 1 else latest
         prev2 = df.iloc[-3] if len(df) > 2 else latest

@@ -148,8 +148,8 @@ class BreakoutStrategy(BaseStrategy):
         signals = []
         
         # 计算高低点
-        df['highest'] = df['high'].rolling(window=self.period).max()
-        df['lowest'] = df['low'].rolling(window=self.period).min()
+        df['highest'] = df['high'].rolling(window=self.period).max().shift(1)
+        df['lowest'] = df['low'].rolling(window=self.period).min().shift(1)
         
         for i in range(self.period, len(df)):
             curr = df.iloc[i]

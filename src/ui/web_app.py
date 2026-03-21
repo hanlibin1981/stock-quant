@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
+from typing import Optional, Tuple
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -205,6 +206,46 @@ def _parse_walkforward_config(args) -> dict:
     return config
 
 
+def _parse_int_query(args, key, default=None, min_value=None, max_value=None) -> tuple[Optional[int], Optional[str]]:
+    """从 query 中安全解析整数参数"""
+    raw = args.get(key)
+    if raw in (None, ""):
+        return default, None
+    try:
+        value = int(raw)
+    except (ValueError, TypeError):
+        return None, f"{key} 必须为整数"
+    if min_value is not None and value < min_value:
+        return None, f"{key} 不能小于 {min_value}"
+    if max_value is not None and value > max_value:
+        return None, f"{key} 不能大于 {max_value}"
+    return value, None
+
+
+def _parse_float_query(args, key, default=None, min_value=None, max_value=None) -> tuple[Optional[float], Optional[str]]:
+    """从 query 中安全解析浮点参数"""
+    raw = args.get(key)
+    if raw in (None, ""):
+        return default, None
+    try:
+        value = float(raw)
+    except (ValueError, TypeError):
+        return None, f"{key} 必须为数字"
+    if min_value is not None and value < min_value:
+        return None, f"{key} 不能小于 {min_value}"
+    if max_value is not None and value > max_value:
+        return None, f"{key} 不能大于 {max_value}"
+    return value, None
+
+
+def _require_json_payload() -> tuple[dict, Optional[str]]:
+    """从请求中提取 JSON payload，保证是字典"""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return {}, "请求体必须是 JSON 对象"
+    return payload, None
+
+
 def _get_backtest_dataframe(code: str, days: int = 250):
     """获取回测所需K线数据"""
     df = None
@@ -241,6 +282,7 @@ def get_realtime():
     
     data = None
     source = ''
+    df = None
     
     # 优先使用 TuShare
     if tushare_client.is_available():
@@ -310,13 +352,13 @@ def get_status():
 def get_kline():
     """获取K线数据"""
     code = request.args.get('code', '000002')
-    days = int(request.args.get('days', 60))
+    days, err = _parse_int_query(request.args, 'days', 60, min_value=1, max_value=500)
+    if err:
+        return jsonify({'success': False, 'error': err})
 
     # 参数验证
     if not _validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
-    if days < 1 or days > 500:
-        return jsonify({'success': False, 'error': 'days必须在1-500之间'})
 
     # 优先使用 TuShare
     df = None
@@ -464,8 +506,12 @@ def optimize_backtest():
     code = request.args.get('code', '000002')
     strategy = request.args.get('strategy', 'multi_factor')
     metric = request.args.get('metric', 'total_return')
-    top_n = int(request.args.get('top_n', 5))
-    max_evals = int(request.args.get('max_evals', 50))
+    top_n, err = _parse_int_query(request.args, 'top_n', 5, min_value=1, max_value=20)
+    if err:
+        return jsonify({'success': False, 'error': err})
+    max_evals, err = _parse_int_query(request.args, 'max_evals', 50, min_value=1, max_value=200)
+    if err:
+        return jsonify({'success': False, 'error': err})
     params = _parse_backtest_params(request.args)
     param_ranges = _parse_optimize_param_ranges(request.args)
     constraints = _parse_optimize_constraints(request.args)
@@ -477,11 +523,6 @@ def optimize_backtest():
     valid_strategies = strategy_engine.get_available_strategies()
     if not _validate_strategy(strategy, valid_strategies):
         return jsonify({'success': False, 'error': f'无效的策略: {strategy}'})
-
-    if top_n < 1 or top_n > 20:
-        return jsonify({'success': False, 'error': 'top_n必须在1-20之间'})
-    if max_evals < 1 or max_evals > 200:
-        return jsonify({'success': False, 'error': 'max_evals必须在1-200之间'})
 
     df, source = _get_backtest_dataframe(code, days=250)
     if df is None or df.empty:
@@ -636,13 +677,13 @@ def search_stock():
 def get_signal():
     """获取交易信号"""
     code = request.args.get('code', '000002')
-    days = int(request.args.get('days', 60))
+    days, err = _parse_int_query(request.args, 'days', 60, min_value=1, max_value=500)
+    if err:
+        return jsonify({'success': False, 'error': err})
 
     # 参数验证
     if not _validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
-    if days < 1 or days > 500:
-        return jsonify({'success': False, 'error': 'days必须在1-500之间'})
 
     # 获取K线数据
     df = None
@@ -706,13 +747,13 @@ def get_signal():
 def get_signal_history():
     """获取历史信号"""
     code = request.args.get('code', '000002')
-    days = int(request.args.get('days', 120))
+    days, err = _parse_int_query(request.args, 'days', 120, min_value=1, max_value=1000)
+    if err:
+        return jsonify({'success': False, 'error': err})
 
     # 参数验证
     if not _validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
-    if days < 1 or days > 1000:
-        return jsonify({'success': False, 'error': 'days必须在1-1000之间'})
 
     df = None
     source = 'tushare'
@@ -830,8 +871,12 @@ def trading_status():
 @app.route('/api/trading/connect', methods=['POST'])
 def trading_connect():
     """连接交易接口"""
-    gateway = request.json.get('gateway', 'simnow')  # simnow模拟, ctp期货
-    
+    payload, err = _require_json_payload()
+    if err:
+        return jsonify({'success': False, 'error': err})
+
+    gateway = payload.get('gateway', 'simnow')  # simnow模拟, ctp期货
+
     try:
         if gateway == 'simnow':
             success = stock_client.connect()
@@ -902,12 +947,23 @@ def trading_balance():
 @app.route('/api/trading/order', methods=['POST'])
 def trading_order():
     """下单"""
-    data = request.json
-    symbol = data.get('symbol', '')
-    direction = data.get('direction', 'long')  # long/sell
-    price = float(data.get('price', 0))
-    volume = int(data.get('volume', 0))
-    order_type = data.get('type', 'limit')  # limit/market
+    payload, err = _require_json_payload()
+    if err:
+        return jsonify({'success': False, 'error': err})
+
+    symbol = str(payload.get('symbol', '')).strip()
+    direction = str(payload.get('direction', 'long')).lower()
+    order_type = str(payload.get('type', 'limit')).lower()
+
+    try:
+        price = float(payload.get('price', 0))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': '价格必须为数字'})
+
+    try:
+        volume = int(payload.get('volume', 0))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': '数量必须为整数'})
 
     # 参数验证
     if not symbol:
@@ -938,7 +994,10 @@ def trading_order():
 @app.route('/api/trading/cancel', methods=['POST'])
 def trading_cancel():
     """撤单"""
-    order_id = request.json.get('order_id', '')
+    payload, err = _require_json_payload()
+    if err:
+        return jsonify({'success': False, 'error': err})
+    order_id = str(payload.get('order_id', '')).strip()
 
     if not order_id:
         return jsonify({'success': False, 'error': '订单ID不能为空'})
