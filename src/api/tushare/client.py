@@ -218,10 +218,14 @@ class TushareClient:
 
 # 单例实例
 _tushare_client = None
+_tushare_lock = threading.Lock()
 
 def get_tushare_client() -> TushareClient:
-    """获取 TuShare 客户端单例"""
+    """获取 TuShare 客户端单例（线程安全）"""
     global _tushare_client
     if _tushare_client is None:
-        _tushare_client = TushareClient()
+        with _tushare_lock:
+            # 双重检查锁定模式
+            if _tushare_client is None:
+                _tushare_client = TushareClient()
     return _tushare_client

@@ -5,19 +5,20 @@
 
 import pandas as pd
 import numpy as np
+import threading
 from datetime import datetime, timedelta
 
 
 class MockDataGenerator:
     """生成模拟股票数据"""
 
-    # 全局随机种子状态，允许外部重置以实现不同场景模拟
-    _global_seed = None
+    # 线程本地存储，用于线程安全的种子管理
+    _thread_local = threading.local()
 
     @classmethod
     def reset_seed(cls, seed: int = None):
         """重置随机种子，None 则使用代码+时间哈希（每次不同）"""
-        cls._global_seed = seed if seed is not None else hash(str(datetime.now())) % 100000
+        cls._thread_local.seed = seed if seed is not None else hash(str(datetime.now())) % 100000
 
     @staticmethod
     def generate_kline(code: str = '000002', days: int = 60, base_price: float = 10.0) -> pd.DataFrame:

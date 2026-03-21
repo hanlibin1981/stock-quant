@@ -150,7 +150,7 @@ class StockDataManager:
     
     def save_stock_info(self, code: str, name: str, industry: str = None, market: str = "A股"):
         """保存股票基本信息（线程安全）"""
-        with _db_write_lock:
+        with _db_lock:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""

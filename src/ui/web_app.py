@@ -17,16 +17,6 @@ from typing import Optional, Tuple
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 股票代码正则: 6位数字，以0/3/6开头
-STOCK_CODE_PATTERN = re.compile(r'^(0|3|6)\d{5}$')
-
-
-def _validate_stock_code(code: str) -> bool:
-    """验证股票代码格式"""
-    if not code or not isinstance(code, str):
-        return False
-    return bool(STOCK_CODE_PATTERN.match(code.strip()))
-
 
 def _validate_strategy(strategy: str, valid_strategies: list) -> bool:
     """验证策略名是否有效"""
@@ -50,6 +40,7 @@ src_root = Path(__file__).parent.parent
 sys.path.insert(0, str(src_root))
 
 from flask import Flask, render_template, jsonify, request
+from src.utils.validation import validate_stock_code
 from src.core.data.stock_data import StockDataManager
 from src.core.indicator.calculator import IndicatorCalculator
 from src.core.strategy.strategy import StrategyEngine
@@ -361,7 +352,7 @@ def get_kline():
         return jsonify({'success': False, 'error': err})
 
     # 参数验证
-    if not _validate_stock_code(code):
+    if not validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
 
     # 优先使用 TuShare
@@ -407,7 +398,7 @@ def get_indicators():
     indicators = request.args.getlist('indicators')
 
     # 参数验证
-    if not _validate_stock_code(code):
+    if not validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
 
     if not indicators:
@@ -460,7 +451,7 @@ def run_backtest():
     params = _parse_backtest_params(request.args)
 
     # 验证股票代码
-    if not _validate_stock_code(code):
+    if not validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
 
     # 验证策略名
@@ -521,7 +512,7 @@ def optimize_backtest():
     constraints = _parse_optimize_constraints(request.args)
 
     # 参数验证
-    if not _validate_stock_code(code):
+    if not validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
 
     valid_strategies = strategy_engine.get_available_strategies()
@@ -560,7 +551,7 @@ def walkforward_backtest():
     walkforward_config = _parse_walkforward_config(request.args)
 
     # 参数验证
-    if not _validate_stock_code(code):
+    if not validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
 
     valid_strategies = strategy_engine.get_available_strategies()
@@ -686,7 +677,7 @@ def get_signal():
         return jsonify({'success': False, 'error': err})
 
     # 参数验证
-    if not _validate_stock_code(code):
+    if not validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
 
     # 获取K线数据
@@ -756,7 +747,7 @@ def get_signal_history():
         return jsonify({'success': False, 'error': err})
 
     # 参数验证
-    if not _validate_stock_code(code):
+    if not validate_stock_code(code):
         return jsonify({'success': False, 'error': f'无效的股票代码: {code}'})
 
     df = None
@@ -972,7 +963,7 @@ def trading_order():
     # 参数验证
     if not symbol:
         return jsonify({'success': False, 'error': '股票代码不能为空'})
-    if not _validate_stock_code(symbol):
+    if not validate_stock_code(symbol):
         return jsonify({'success': False, 'error': f'无效的股票代码: {symbol}'})
     if direction not in ['long', 'short', 'buy', 'sell']:
         return jsonify({'success': False, 'error': '无效的交易方向'})

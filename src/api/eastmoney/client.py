@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from src.utils.logger import get_logger
+from src.utils.validation import validate_stock_code, validate_stock_code_with_exchange
 
 logger = get_logger(__name__)
 
@@ -39,9 +40,6 @@ class EastMoneyClient:
 
     BASE_URL = "https://push2.eastmoney.com"
 
-    # 股票代码正则: 6位数字，以0/3/6开头
-    STOCK_CODE_PATTERN = re.compile(r'^(0|3|6)\d{5}$')
-
     def __init__(self, max_retries: int = 3):
         self.max_retries = max_retries
         self.headers = {
@@ -56,20 +54,17 @@ class EastMoneyClient:
 
     def _validate_code(self, code: str) -> bool:
         """验证股票代码格式"""
-        if not code or not isinstance(code, str):
-            return False
-        return bool(self.STOCK_CODE_PATTERN.match(code.strip()))
+        return validate_stock_code(code)
 
     def _convert_secid(self, code: str) -> str:
         """将股票代码转换为市场secid"""
-        if not self._validate_code(code):
+        result = validate_stock_code_with_exchange(code)
+        if not result:
             raise ValueError(f"无效的股票代码: {code}")
-        if code.startswith('6'):
-            return f"1.{code}"  # 上海
-        elif code.startswith('0') or code.startswith('3'):
-            return f"0.{code}"  # 深圳
-        else:
-            raise ValueError(f"不支持的股票代码: {code}")
+        code, exchange = result
+        # eastmoney 使用 1.前缀表示上海，0.前缀表示深圳
+        prefix = "1" if exchange == "SH" else "0"
+        return f"{prefix}.{code}"
     
     @_retry_on_error(max_retries=3, delay=0.5)
     def get_realtime(self, code: str) -> Optional[Dict]:
