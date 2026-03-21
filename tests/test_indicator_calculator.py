@@ -182,13 +182,14 @@ class IndicatorCalculatorSignalsTestCase(unittest.TestCase):
     def test_rsi_overbought_signal(self):
         """测试 RSI 超买信号"""
         dates = pd.date_range('2024-01-01', periods=30, freq='D')
-        # 构造超买数据
-        close = [20] * 30
+        # 构造超买数据：价格持续上涨后达到高位
+        # RSI > 80 表示超买，平坦价格（gain=0, loss=0）应返回中性 RSI=50
+        close = list(np.linspace(5, 20, 30))  # 从5涨到20，持续上涨制造超买
         df = pd.DataFrame({
             'date': dates,
             'open': close,
-            'high': close,
-            'low': close,
+            'high': [c + 0.5 for c in close],
+            'low': [c - 0.5 for c in close],
             'close': close,
             'volume': [100000] * 30,
         })

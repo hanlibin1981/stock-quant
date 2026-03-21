@@ -177,53 +177,61 @@ class BreakoutStrategy(BaseStrategy):
 
 class RSIStrategy(BaseStrategy):
     """RSI 策略"""
-    
+
     name = "RSI策略"
     description = "RSI低于20超卖买入，高于80超买卖出"
-    
+
     def __init__(self, params: Dict = None):
         super().__init__(params)
         self.period = self.params.get('period', 14)
         self.oversold = self.params.get('oversold', 20)
         self.overbought = self.params.get('overbought', 80)
-    
+
     def generate_signals(self, df: pd.DataFrame) -> List[TradeSignal]:
         signals = []
-        
-        # 计算 RSI
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=self.period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=self.period).mean()
-        rs = gain / loss
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
+
+        # 优先复用已有的 RSI 列（由 IndicatorCalculator 计算），
+        # 否则自己计算。rs6 列对应 period=6，与 self.period 可能不同，
+        # 这里取 self.period 匹配的列，或 fallback 到手动计算。
+        rsi_col = f'rsi{self.period}'
+        if rsi_col not in df.columns:
+            # 手动计算 RSI
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=self.period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=self.period).mean()
+            rs = gain / loss.replace(0, np.nan)
+            df['rsi'] = (100 - (100 / (1 + rs))).fillna(50)
+            rsi_col = 'rsi'
+
         position = None  # 当前持仓状态
-        
+
         for i in range(self.period, len(df)):
             curr = df.iloc[i]
-            
-            if pd.isna(curr['rsi']):
+
+            if pd.isna(curr.get(rsi_col)):
                 continue
-            
+
+            rsi = curr[rsi_col]
+
             # 超卖买入
-            if curr['rsi'] < self.oversold and position != 'long':
+            if rsi < self.oversold and position != 'long':
                 signals.append(TradeSignal(
                     date=str(curr['date']),
                     signal=SignalType.BUY,
                     price=curr['close'],
-                    reason=f"RSI超卖({curr['rsi']:.1f})"
+                    reason=f"RSI超卖({rsi:.1f})"
                 ))
                 position = 'long'
             # 超买卖出
-            elif curr['rsi'] > self.overbought and position == 'long':
+            elif rsi > self.overbought and position == 'long':
                 signals.append(TradeSignal(
                     date=str(curr['date']),
                     signal=SignalType.SELL,
                     price=curr['close'],
-                    reason=f"RSI超买({curr['rsi']:.1f})"
+                    reason=f"RSI超买({rsi:.1f})"
                 ))
                 position = None
-        
+
         return signals
 
 

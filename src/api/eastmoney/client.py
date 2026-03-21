@@ -195,7 +195,7 @@ class EastMoneyClient:
                         })
 
                 if invalid_count > 0:
-                    logger.warning(f"过滤了 {invalid_count} 条异常K线数据")
+                    logger.warning(f"股票 {code} 过滤了 {invalid_count} 条异常K线数据")
 
                 df = pd.DataFrame(records)
                 df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')

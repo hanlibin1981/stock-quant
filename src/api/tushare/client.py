@@ -5,6 +5,7 @@ Tushare 数据源
 
 import os
 import sys
+import threading
 from pathlib import Path
 import pandas as pd
 from typing import Optional, Dict, List
@@ -20,7 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class TushareClient:
-    """TuShare 数据客户端"""
+    """TuShare 数据客户端（线程安全单例）"""
+
+    _lock = threading.Lock()
 
     def __init__(self, token: str = None):
         self.token = token or os.environ.get('TUSHARE_TOKEN')
@@ -32,18 +35,22 @@ class TushareClient:
             self._init_pro()
 
     def _init_pro(self):
-        """初始化 TuShare Pro"""
-        try:
-            import tushare as ts
-            self._ts_module = ts  # 缓存模块引用
-            ts.set_token(self.token)
-            self.pro = ts.pro_api()
-            logger.info("TuShare Pro initialized successfully")
-        except ImportError:
-            logger.warning("tushare not installed")
-        except Exception as e:
-            logger.error(f"Error initializing TuShare: {e}")
-    
+        """初始化 TuShare Pro（线程安全）"""
+        with self._lock:
+            # 双重检查（进入锁后再次确认，避免重复初始化）
+            if self.pro is not None:
+                return
+            try:
+                import tushare as ts
+                self._ts_module = ts  # 缓存模块引用
+                ts.set_token(self.token)
+                self.pro = ts.pro_api()
+                logger.info("TuShare Pro initialized successfully")
+            except ImportError:
+                logger.warning("tushare not installed")
+            except Exception as e:
+                logger.error(f"Error initializing TuShare: {e}")
+
     def is_available(self) -> bool:
         """检查是否可用"""
         return self.pro is not None

@@ -17,8 +17,10 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 数据库写锁 (SQLite并发控制)
-_db_write_lock = threading.Lock()
+# 数据库读写锁 (SQLite并发控制)
+# 注：SQLite 在多线程下同一连接不能跨线程使用，
+# 因此所有数据库访问都必须串行化
+_db_lock = threading.Lock()
 
 
 class StockDataManager:
@@ -105,8 +107,9 @@ class StockDataManager:
 
         query += " ORDER BY date ASC"
 
-        with sqlite3.connect(self.db_path) as conn:
-            df = pd.read_sql_query(query, conn, params=params)
+        with _db_lock:
+            with sqlite3.connect(self.db_path) as conn:
+                df = pd.read_sql_query(query, conn, params=params)
 
         if df.empty:
             return None
@@ -139,7 +142,7 @@ class StockDataManager:
             INSERT OR REPLACE INTO daily_kline (code, date, open, high, low, close, volume, amount)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
-        with _db_write_lock:
+        with _db_lock:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.executemany(insert_sql, rows)

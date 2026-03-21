@@ -34,11 +34,15 @@ def _validate_strategy(strategy: str, valid_strategies: list) -> bool:
 
 # 添加虚拟env site-packages 到路径
 venv_path = Path(__file__).parent.parent.parent / "venv" / "lib"
-# 查找 Python 版本目录
-for p in venv_path.iterdir():
-    if p.is_dir() and p.name.startswith("python"):
-        sys.path.insert(0, str(p / "site-packages"))
-        break
+# 查找当前 Python 版本对应的 site-packages 目录
+current_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+found = False
+if venv_path.exists():
+    for p in venv_path.iterdir():
+        if p.is_dir() and p.name == current_version:
+            sys.path.insert(0, str(p / "site-packages"))
+            found = True
+            break
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent

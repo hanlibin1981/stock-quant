@@ -613,19 +613,27 @@ class SignalGenerator:
         return {'indicator': 'CCI', 'signal': 'hold', 'reason': f'中性({cci:.0f})', 'strength': 0}
     
     def _analyze_wr(self, df: pd.DataFrame) -> Dict:
-        """威廉指标分析"""
+        """威廉指标分析
+        
+        WR 指标范围是 -100 到 0（大多数实现）：
+        - WR 接近 -100（绝对值大）= 超卖区域 → 买入信号
+        - WR 接近 0（绝对值小）= 超买区域 → 卖出信号
+        计算器输出的 wr6 已经是负值（-50 附近为中性），
+        abs(wr6) 越大表示越超卖，越小表示越超买。
+        """
         latest = df.iloc[-1]
         wr6 = latest.get('wr6', -50) or -50
-        
-        # WR 超卖是负值，转换一下
-        wr = abs(wr6)
-        
-        if wr < 20:
-            return {'indicator': 'WR', 'signal': 'sell', 'reason': f'超买({wr:.0f})', 'strength': 0.7}
-        elif wr > 80:
-            return {'indicator': 'WR', 'signal': 'buy', 'reason': f'超卖({wr:.0f})', 'strength': 0.7}
-        
-        return {'indicator': 'WR', 'signal': 'hold', 'reason': f'中性({wr:.0f})', 'strength': 0}
+
+        # wr6 范围是 -100 ~ 0，abs() 后 0 ~ 100
+        # abs(wr6) 越小（接近0）= 超买，abs(wr6) 越大（接近100）= 超卖
+        abs_wr = abs(wr6)
+
+        if abs_wr > 80:  # 接近 -100，超卖 → 买入
+            return {'indicator': 'WR', 'signal': 'buy', 'reason': f'超卖({abs_wr:.0f})', 'strength': 0.7}
+        elif abs_wr < 20:  # 接近 0，超买 → 卖出
+            return {'indicator': 'WR', 'signal': 'sell', 'reason': f'超买({abs_wr:.0f})', 'strength': 0.7}
+
+        return {'indicator': 'WR', 'signal': 'hold', 'reason': f'中性({abs_wr:.0f})', 'strength': 0}
     
     def _analyze_volume(self, df: pd.DataFrame) -> Dict:
         """成交量分析"""

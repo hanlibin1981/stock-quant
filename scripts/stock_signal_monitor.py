@@ -15,17 +15,30 @@ from pathlib import Path
 project_root = Path('/Users/mac/openclaw-projects/stock-quant')
 sys.path.insert(0, str(project_root / 'src'))
 
-# 飞书配置 - 使用用户允许列表中的ID
+# 飞书配置
 APP_ID = "cli_a933a6038e795cee"
 APP_SECRET = "BbEax5s72y1hQDLoEKkWlaJDfHdrrRYC"
 USER_ID = "162611g9"  # 用户ID
 
-# 监控的股票列表
-WATCH_LIST = ['000002', '600519', '600036', '000858', '000001']
+# 监控的股票列表（从共用配置导入）
+from watch_stocks import WATCH_LIST
 
 # 缓存token
 _cached_token = None
 _token_expires_at = 0
+
+
+def _load_env_file():
+    """加载环境变量，确保能读取 TUSHARE_TOKEN"""
+    env_file = project_root / 'config' / 'production.env'
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        os.environ.setdefault(key.strip(), value.strip())
 
 
 def get_tenant_access_token():
@@ -51,38 +64,25 @@ def get_tenant_access_token():
 
 
 def send_feishu_message(token, message):
-    """发送飞书消息 - 多种方式尝试"""
-    
-    # 方式1: 使用 IM API 发送文本消息
+    """发送飞书消息到用户（通过 user_id）"""
     url = "https://open.feishu.cn/open-apis/im/v1/messages"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    
-    # 尝试发送给用户 (open_id)
-    for id_type, receive_id in [("open_id", None), ("user_id", USER_ID)]:
-        if receive_id is None:
-            # 先获取用户的 open_id
-            get_url = f"https://open.feishu.cn/open-apis/contact/v3/users/{receive_id or USER_ID}"
-            try:
-                resp = requests.get(get_url, headers=headers, timeout=10)
-                result = resp.json()
-                if result.get('code') == 0:
-                    receive_id = result.get('data', {}).get('user', {}).get('open_id')
-            except:
-                pass
-        
-        if receive_id:
-            params = {"receive_id_type": id_type}
-            data = {"receive_id": receive_id, "msg_type": "text", "content": json.dumps({"text": message})}
-            try:
-                resp = requests.post(url, headers=headers, json=data, params=params, timeout=10)
-                result = resp.json()
-                if result.get('code') == 0:
-                    return True
-                print(f"发送失败 ({id_type}): {result.get('msg')}")
-            except Exception as e:
-                print(f"发送异常: {e}")
-    
-    return False
+    params = {"receive_id_type": "user_id"}
+    data = {
+        "receive_id": USER_ID,
+        "msg_type": "text",
+        "content": json.dumps({"text": message}, ensure_ascii=False)
+    }
+    try:
+        resp = requests.post(url, headers=headers, json=data, params=params, timeout=10)
+        result = resp.json()
+        if result.get('code') == 0:
+            return True
+        print(f"发送失败: {result.get('msg')} (code={result.get('code')})")
+        return False
+    except Exception as e:
+        print(f"发送异常: {e}")
+        return False
 
 
 def get_stock_signal(code):
@@ -169,6 +169,7 @@ def is_trading_hours():
 
 
 def main():
+    _load_env_file()
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 股票信号监控任务开始")
     
     if not is_trading_day():
@@ -180,12 +181,13 @@ def main():
         return
     
     signals = []
-    for code in WATCH_LIST:
+    for code, name in WATCH_LIST:
         try:
             signal = get_stock_signal(code)
             if signal:
+                signal['name'] = name
                 signals.append(signal)
-                print(f"股票 {code}: {signal['signal']} - {signal['reason']}")
+                print(f"股票 {code} {name}: {signal['signal']} - {signal['reason']}")
         except Exception as e:
             print(f"获取 {code} 信号失败: {e}")
     
@@ -207,7 +209,7 @@ def main():
         # 多周期标记
         multi_tag = " [多周期✅]" if s.get('is_multi_period', False) else ""
         
-        message += f"{emoji} {s['code']}: {signal_text}{multi_tag} (强度:{s['strength']*100:.0f}%)\n"
+        message += f"{emoji} {s['code']} {s.get('name', '')}: {signal_text}{multi_tag} (强度:{s['strength']*100:.0f}%)\n"
         message += f"   原因: {s['reason']}\n"
         
         # 显示各周期信号

@@ -17,11 +17,8 @@ APP_ID = "cli_a933a6038e795cee"
 APP_SECRET = "BbEax5s72y1hQDLoEKkWlaJDfHdrrRYC"
 USER_ID = "162611g9"
 
-# 监控的股票列表 (代码: 名称)
-WATCH_LIST = [
-    ('000002', '万科A'),
-    ('600036', '招商银行'),
-]
+# 监控的股票列表（从共用配置导入）
+from watch_stocks import WATCH_LIST
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = PROJECT_ROOT / 'src'

@@ -10,18 +10,28 @@ from datetime import datetime, timedelta
 
 class MockDataGenerator:
     """生成模拟股票数据"""
-    
+
+    # 全局随机种子状态，允许外部重置以实现不同场景模拟
+    _global_seed = None
+
+    @classmethod
+    def reset_seed(cls, seed: int = None):
+        """重置随机种子，None 则使用代码+时间哈希（每次不同）"""
+        cls._global_seed = seed if seed is not None else hash(str(datetime.now())) % 100000
+
     @staticmethod
     def generate_kline(code: str = '000002', days: int = 60, base_price: float = 10.0) -> pd.DataFrame:
         """生成模拟K线数据"""
-        np.random.seed(hash(code) % 10000)
-        
+        # 使用 code 的哈希作为基础种子，允许不同股票有不同走势
+        seed = hash(code) % 10000
+        np.random.seed(seed)
+
         dates = pd.date_range(end=datetime.now(), periods=days, freq='D')
-        
+
         # 模拟价格走势
         returns = np.random.normal(0.001, 0.02, days)
         prices = base_price * np.exp(np.cumsum(returns))
-        
+
         # 生成OHLC数据
         data = []
         for i, (date, close) in enumerate(zip(dates, prices)):
@@ -29,7 +39,7 @@ class MockDataGenerator:
             high_price = max(open_price, close) * (1 + np.random.uniform(0, 0.02))
             low_price = min(open_price, close) * (1 - np.random.uniform(0, 0.02))
             volume = int(np.random.uniform(1000000, 10000000))
-            
+
             data.append({
                 'date': date,
                 'open': round(open_price, 2),
@@ -39,7 +49,7 @@ class MockDataGenerator:
                 'volume': volume,
                 'amount': volume * close
             })
-        
+
         df = pd.DataFrame(data)
         # 确保日期格式正确
         df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')

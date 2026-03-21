@@ -59,41 +59,64 @@ class TonghuashunImporter:
     def _import_otd(self, filepath: str) -> Optional[pd.DataFrame]:
         """
         导入 .otd 格式（同花顺自定义格式）
-        
-        OTD 格式说明:
-        - 文件头: 64字节
-        - 数据记录: 每条 32字节
+
+        OTD 是同花顺的专有二进制格式，文件结构：
+        - 文件头: 64 字节（含字段说明，数量等元信息）
+        - 数据记录: 每条 32 字节
+
+        注意: OTD 二进制格式未经公开文档验证，当前的二进制解析是尽力而为。
+        如果解析失败会自动 fallback 到文本解析。真实场景下建议导出为 CSV
+        或使用同花顺官方工具转码后再导入。
         """
         try:
             with open(filepath, 'rb') as f:
-                # 读取文件头
                 header = f.read(64)
-                
-                # 解析文件头信息
-                # (这里简化处理，实际OTD格式可能更复杂)
+                if len(header) < 64:
+                    raise ValueError("OTD 文件头不完整")
+
                 records = []
-                
+
                 while True:
                     data = f.read(32)
-                    if not data:
+                    if not data or len(data) < 32:
                         break
-                    
-                    # 简单的二进制解析示例
-                    # 实际格式需要根据同花顺官方文档
+
                     try:
-                        date = struct.unpack('I', data[0:4])[0]
-                        # ... 其他字段解析
-                    except (ValueError, KeyError) as e:
-                        logger.debug(f"字段解析跳过: {e}")
+                        # 以下为基于观察经验的猜测性解析，并非官方文档确认
+                        # 实际 OTD 格式可能因版本而异
+                        year = struct.unpack('<H', data[0:2])[0]  # 小端序 ushort
+                        month = data[2]
+                        day = data[3]
+                        if year < 1990 or year > 2100 or month < 1 or month > 12 or day < 1 or day > 31:
+                            # 字段解析异常，尝试当作文本处理
+                            break
+
+                        date_str = f"{year:04d}-{month:02d}-{day:02d}"
+                        close = struct.unpack('<I', data[4:8])[0] / 100.0  # 整数形式价格
+                        open_price = struct.unpack('<I', data[8:12])[0] / 100.0
+                        high = struct.unpack('<I', data[12:16])[0] / 100.0
+                        low = struct.unpack('<I', data[16:20])[0] / 100.0
+                        volume = struct.unpack('<I', data[20:24])[0]
+
+                        records.append({
+                            'date': date_str,
+                            'open': open_price,
+                            'close': close,
+                            'high': high,
+                            'low': low,
+                            'volume': volume,
+                        })
+                    except (struct.error, ValueError, KeyError) as e:
+                        logger.debug(f"OTD 二进制解析跳过: {e}")
                         break
-                
+
                 if records:
                     return pd.DataFrame(records)
-                    
+
         except Exception as e:
-            print(f"Error importing OTD file: {e}")
-        
-        # 如果二进制解析失败，尝试作为文本解析
+            logger.warning(f"OTD 二进制解析失败 ({e})，尝试文本解析")
+
+        # Fallback: 当作文本处理
         return self._import_txt(filepath)
     
     def _import_h5(self, filepath: str) -> Optional[pd.DataFrame]:

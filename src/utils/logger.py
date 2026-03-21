@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 class JSONFormatter(logging.Formatter):
-    """JSON 格式日志"""
+    """JSON 格式日志（支持 Unicode）"""
 
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
@@ -19,7 +19,8 @@ class JSONFormatter(logging.Formatter):
         }
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_data)
+        # 使用 ensure_ascii=False 保证中文等非 ASCII 字符不被转义
+        return json.dumps(log_data, ensure_ascii=False)
 
 
 def setup_logger(name: str = "stock_quant", level: int = logging.INFO) -> logging.Logger:

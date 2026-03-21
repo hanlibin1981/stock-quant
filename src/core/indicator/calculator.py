@@ -97,9 +97,15 @@ class IndicatorCalculator:
             gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
-            # 明确处理除零情况：当loss为0时（无亏损），RSI=100
-            rs = np.where(loss == 0, np.inf, gain / loss)
-            df[f'rsi{period}'] = np.where(rs == np.inf, 100, 100 - (100 / (1 + rs)))
+            # 处理除零情况：
+            # - loss == 0（无亏损）→ RSI = 100
+            # - gain == 0 & loss == 0（价格完全不动）→ RSI = 50（中性）
+            rs = np.where((gain == 0) & (loss == 0), np.nan,
+                     np.where(loss == 0, np.inf, gain / loss))
+            df[f'rsi{period}'] = np.where(
+                np.isnan(rs), 50,
+                np.where(np.isinf(rs), 100, 100 - (100 / (1 + rs)))
+            )
 
         return df
     
