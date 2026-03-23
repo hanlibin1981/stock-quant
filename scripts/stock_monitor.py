@@ -12,29 +12,16 @@ import requests
 from pathlib import Path
 from datetime import datetime
 
-# 飞书配置
-APP_ID = "cli_a933a6038e795cee"
-APP_SECRET = "BbEax5s72y1hQDLoEKkWlaJDfHdrrRYC"
-USER_ID = "162611g9"
-
-# 监控的股票列表（从共用配置导入）
-from watch_stocks import WATCH_LIST
-
+# 项目路径（需要最先定义，因为后面的函数需要用到）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = PROJECT_ROOT / 'src'
 ENV_FILE = PROJECT_ROOT / 'config' / 'production.env'
 
-# 添加项目路径
-sys.path.insert(0, str(SRC_ROOT))
-
-_cached_token = None
-
-
-def load_env_file():
-    """加载本地生产环境变量，确保脚本模式下也能读取 TUSHARE_TOKEN。"""
+# 先加载环境变量函数
+def _load_env_file():
+    """加载本地生产环境变量"""
     if not ENV_FILE.exists():
         return
-
     for raw_line in ENV_FILE.read_text(encoding='utf-8').splitlines():
         line = raw_line.strip()
         if not line or line.startswith('#') or '=' not in line:
@@ -42,11 +29,28 @@ def load_env_file():
         key, value = line.split('=', 1)
         os.environ.setdefault(key.strip(), value.strip())
 
+# 在模块加载时立即读取环境变量
+_load_env_file()
+
+# 添加项目路径
+sys.path.insert(0, str(SRC_ROOT))
+
+# 飞书配置 - 从环境变量读取
+APP_ID = os.environ.get('FEISHU_APP_ID', '')
+APP_SECRET = os.environ.get('FEISHU_APP_SECRET', '')
+USER_ID = os.environ.get('FEISHU_USER_ID', '162611g9')
+
+# 监控的股票列表（从共用配置导入）
+from watch_stocks import WATCH_LIST
+
+_cached_token = None
+
+
 def get_token():
     global _cached_token
     if _cached_token:
         return _cached_token
-    
+
     url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
     try:
         resp = requests.post(url, json={"app_id": APP_ID, "app_secret": APP_SECRET}, timeout=10)
@@ -54,9 +58,12 @@ def get_token():
         if result.get('code') == 0:
             _cached_token = result.get('tenant_access_token')
             return _cached_token
-    except:
-        pass
+    except requests.RequestException as e:
+        print(f"获取token失败: {e}")
+    except (ValueError, KeyError) as e:
+        print(f"解析token响应失败: {e}")
     return None
+
 
 def get_signal(code):
     try:
@@ -66,14 +73,14 @@ def get_signal(code):
         from api.tencent import get_tencent_client
         from core.indicator import IndicatorCalculator
         from core.signal import get_signal_generator
-        
+
         tushare = get_tushare_client()
         eastmoney = EastMoneyClient()
         tencent = get_tencent_client()
         mock = MockDataGenerator()
         indicator = IndicatorCalculator()
         signal_gen = get_signal_generator()
-        
+
         # 获取实时价格
         realtime_price = None
         realtime_source = None
@@ -84,7 +91,7 @@ def get_signal(code):
                 realtime_source = 'tencent'
         except Exception as e:
             print(f"Error fetching realtime for {code}: {e}")
-        
+
         df = None
         kline_source = 'tushare'
         if tushare.is_available():
@@ -98,17 +105,17 @@ def get_signal(code):
         if df is None or (hasattr(df, 'empty') and df.empty):
             df = mock.generate_kline(code, days=60)
             kline_source = 'mock'
-        
+
         if df is None or (hasattr(df, 'empty') and df.empty):
             return None
-        
+
         # 计算所有指标
         df = indicator.calculate(df)
         result = signal_gen.analyze(df)
-        
+
         # 优先使用实时价格，否则用收盘价
         price = realtime_price if realtime_price else float(df.iloc[-1]['close']) if len(df) > 0 else 0
-        
+
         return {
             'code': code,
             'signal': result.get('signal', 'hold'),
@@ -127,6 +134,7 @@ def get_signal(code):
         traceback.print_exc()
         return None
 
+
 def send_message(token, msg):
     url = "https://open.feishu.cn/open-apis/im/v1/messages"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -135,8 +143,13 @@ def send_message(token, msg):
     try:
         resp = requests.post(url, headers=headers, json=data, params=params, timeout=10)
         return resp.json().get('code') == 0
-    except:
+    except requests.RequestException as e:
+        print(f"发送消息失败: {e}")
         return False
+    except (ValueError, KeyError) as e:
+        print(f"解析响应失败: {e}")
+        return False
+
 
 def is_trading_hours():
     now = datetime.now()
@@ -144,6 +157,7 @@ def is_trading_hours():
         return False
     current_time = now.hour * 60 + now.minute
     return (570 <= current_time <= 690) or (780 <= current_time <= 900)
+
 
 def format_signal_message(signals, now_str):
     """优化格式的交易信号消息"""
@@ -153,18 +167,18 @@ def format_signal_message(signals, now_str):
         'sideways': '➡️',
         'unknown': '❓'
     }
-    
+
     # 服务访问地址
-    web_url = "http://192.168.31.9:5002"
-    
+    web_url = "http://192.168.31.241:5004"
+
     msg = f"📊 交易信号 ({now_str})\n"
     msg += "=" * 40 + "\n\n"
-    
+
     for s in signals:
         name = s.get('name', s['code'])
         trend = s.get('trend', 'unknown')
         trend_ico = trend_emoji.get(trend, '❓')
-        
+
         # 信号判断
         if s['signal'] == 'buy':
             emoji = "🟢"
@@ -175,7 +189,7 @@ def format_signal_message(signals, now_str):
         else:
             emoji = "➡️"
             txt = "观望"
-        
+
         msg += f"{emoji} {s['code']} {name}\n"
         msg += f"   信号: {txt} | 强度: {s['strength']*100:.0f}% | 趋势: {trend_ico}{trend}\n"
         msg += f"   原因: {s['reason']}\n"
@@ -183,7 +197,7 @@ def format_signal_message(signals, now_str):
         if s.get('realtime_price'):
             msg += " (实时)"
         msg += "\n"
-        
+
         # 添加关键技术指标
         details = s.get('details', {})
         if details:
@@ -199,7 +213,7 @@ def format_signal_message(signals, now_str):
             if details.get('cci'):
                 parts.append(f"CCI{details['cci']:.0f}")
             msg += " | ".join(parts) + "\n"
-        
+
         # 支撑/压力位
         if details:
             sup = details.get('support')
@@ -211,22 +225,22 @@ def format_signal_message(signals, now_str):
                 if res:
                     msg += f"压力¥{res:.2f}"
                 msg += "\n"
-        
+
         msg += "\n"
-    
+
     # 添加服务访问地址
     msg += f"🌐 Web界面: {web_url}\n"
-    
+
     return msg
 
+
 def main():
-    load_env_file()
     print(f"[{datetime.now()}] 股票信号监控开始 (优化版)")
-    
+
     if not is_trading_hours():
         print("不在交易时间，跳过")
         return
-    
+
     signals = []
     for code, name in WATCH_LIST:
         s = get_signal(code)
@@ -237,22 +251,23 @@ def main():
                 f"{code} {name}: {s['signal']} - {s['reason']} "
                 f"[kline={s.get('kline_source', 'unknown')}, price={s.get('realtime_source', 'unknown')}]"
             )
-    
+
     if not signals:
         print("无信号")
         return
-    
+
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
     msg = format_signal_message(signals, now)
-    
+
     print("\n消息内容:")
     print(msg)
-    
+
     token = get_token()
     if token and send_message(token, msg):
         print("\n✅ 发送成功")
     else:
         print("\n⚠️ 发送失败")
+
 
 if __name__ == '__main__':
     main()

@@ -15,3 +15,7 @@ config/production.env
 .pytest_cache/
 .coverage
 htmlcov/
+
+# 日志文件
+*.log
+server.log

@@ -15,21 +15,9 @@ from pathlib import Path
 project_root = Path('/Users/mac/openclaw-projects/stock-quant')
 sys.path.insert(0, str(project_root / 'src'))
 
-# 飞书配置
-APP_ID = "cli_a933a6038e795cee"
-APP_SECRET = "BbEax5s72y1hQDLoEKkWlaJDfHdrrRYC"
-USER_ID = "162611g9"  # 用户ID
-
-# 监控的股票列表（从共用配置导入）
-from watch_stocks import WATCH_LIST
-
-# 缓存token
-_cached_token = None
-_token_expires_at = 0
-
 
 def _load_env_file():
-    """加载环境变量，确保能读取 TUSHARE_TOKEN"""
+    """加载环境变量，确保能读取 TUSHARE_TOKEN 和飞书配置"""
     env_file = project_root / 'config' / 'production.env'
     if not env_file.exists():
         return
@@ -41,14 +29,30 @@ def _load_env_file():
         os.environ.setdefault(key.strip(), value.strip())
 
 
+# 在模块加载时立即读取环境变量
+_load_env_file()
+
+# 飞书配置 - 从环境变量读取
+APP_ID = os.environ.get('FEISHU_APP_ID', '')
+APP_SECRET = os.environ.get('FEISHU_APP_SECRET', '')
+USER_ID = os.environ.get('FEISHU_USER_ID', '162611g9')
+
+# 监控的股票列表（从共用配置导入）
+from watch_stocks import WATCH_LIST
+
+# 缓存token
+_cached_token = None
+_token_expires_at = 0
+
+
 def get_tenant_access_token():
     """获取飞书 tenant_access_token"""
     global _cached_token, _token_expires_at
-    
+
     import time
     if _cached_token and time.time() < _token_expires_at:
         return _cached_token
-    
+
     url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
     data = {"app_id": APP_ID, "app_secret": APP_SECRET}
     try:
@@ -92,16 +96,16 @@ def get_stock_signal(code):
     from api.mock_data import MockDataGenerator
     from core.indicator import IndicatorCalculator
     from core.signal import get_signal_generator
-    
+
     tushare = get_tushare_client()
     eastmoney = EastMoneyClient()
     mock = MockDataGenerator()
     indicator = IndicatorCalculator()
     signal_gen = get_signal_generator()
-    
+
     # 获取各周期数据
     data_sources = {}
-    
+
     # 日线 (D) - 60天
     df_daily = None
     if tushare.is_available():
@@ -112,22 +116,22 @@ def get_stock_signal(code):
         df_daily = mock.generate_kline(code, days=60)
     if df_daily is not None and not df_daily.empty:
         data_sources['D'] = df_daily
-    
+
     # 周线 (W) - 40周
     if tushare.is_available():
         df_weekly = tushare.get_kline(code, days=280, ktype='W')
         if df_weekly is not None and not df_weekly.empty:
             data_sources['W'] = df_weekly
-    
+
     # 月线 (M) - 24月
     if tushare.is_available():
         df_monthly = tushare.get_kline(code, days=720, ktype='M')
         if df_monthly is not None and not df_monthly.empty:
             data_sources['M'] = df_monthly
-    
+
     if not data_sources:
         return None
-    
+
     # 多周期分析
     if len(data_sources) > 1:
         # 多周期验证
@@ -139,16 +143,16 @@ def get_stock_signal(code):
         df = indicator.calculate(data_sources.get('D', list(data_sources.values())[0]))
         result = signal_gen.analyze(df)
         is_multi = False
-    
+
     # 获取当前价格
     price = 0
     if 'D' in data_sources:
         price = float(data_sources['D'].iloc[-1]['close']) if len(data_sources['D']) > 0 else 0
-    
+
     return {
-        'code': code, 
-        'signal': result.get('signal', 'hold'), 
-        'reason': result.get('reason', ''), 
+        'code': code,
+        'signal': result.get('signal', 'hold'),
+        'reason': result.get('reason', ''),
         'strength': result.get('strength', 0),
         'price': price,
         'is_multi_period': is_multi,
@@ -169,17 +173,16 @@ def is_trading_hours():
 
 
 def main():
-    _load_env_file()
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 股票信号监控任务开始")
-    
+
     if not is_trading_day():
         print("今天不是交易日，跳过")
         return
-    
+
     if not is_trading_hours():
         print("不在交易时间，跳过")
         return
-    
+
     signals = []
     for code, name in WATCH_LIST:
         try:
@@ -190,28 +193,28 @@ def main():
                 print(f"股票 {code} {name}: {signal['signal']} - {signal['reason']}")
         except Exception as e:
             print(f"获取 {code} 信号失败: {e}")
-    
+
     if not signals:
         print("未获取到任何信号")
         return
-    
+
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
+
     # 检查是否有任何多周期信号
     has_multi = any(s.get('is_multi_period', False) for s in signals)
     title = "📈 多周期验证信号播报" if has_multi else "📈 股票信号播报"
     message = f"{title} ({now})\n\n"
-    
+
     for s in signals:
         emoji = "🟢" if s['signal'] == 'buy' else "🔴" if s['signal'] == 'sell' else "➡️"
         signal_text = "买入" if s['signal'] == 'buy' else "卖出" if s['signal'] == 'sell' else "观望"
-        
+
         # 多周期标记
         multi_tag = " [多周期✅]" if s.get('is_multi_period', False) else ""
-        
+
         message += f"{emoji} {s['code']} {s.get('name', '')}: {signal_text}{multi_tag} (强度:{s['strength']*100:.0f}%)\n"
         message += f"   原因: {s['reason']}\n"
-        
+
         # 显示各周期信号
         if s.get('period_results'):
             periods = []
@@ -221,9 +224,9 @@ def main():
                 p_trend = {'up': '↗', 'down': '↘', 'sideways': '→'}.get(r['trend'], '?')
                 periods.append(f"{p_name}{p_signal}{p_trend}")
             message += f"   周期: {' '.join(periods)}\n"
-        
+
         message += f"   现价: ¥{s['price']:.2f}\n\n"
-    
+
     print("\n发送消息到飞书...")
     token = get_tenant_access_token()
     if token and send_feishu_message(token, message):
