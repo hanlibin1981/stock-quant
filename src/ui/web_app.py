@@ -237,12 +237,14 @@ def _get_backtest_dataframe(code, days=250):
 # 注册蓝图路由
 # =============================================================================
 from src.ui.routes import data_bp, backtest_bp, trading_bp, signal_bp
+from src.ui.routes import data as data_module, backtest as backtest_module
+from src.ui.routes import trading as trading_module, signal as signal_module
 
 # 初始化蓝图的客户端引用
-data_bp.init_clients(_clients)
-backtest_bp.init_clients(_clients)
-trading_bp.init_clients(_clients)
-signal_bp.init_clients(_clients)
+data_module.init_clients(_clients)
+backtest_module.init_clients(_clients)
+trading_module.init_clients(_clients)
+signal_module.init_clients(_clients)
 
 # 注册蓝图
 app.register_blueprint(data_bp)
@@ -289,6 +291,18 @@ def import_data():
             os.rmdir(temp_dir)
         except OSError:
             pass
+
+
+# =============================================================================
+# SPA Fallback - 所有非 API/static 路由都返回 index.html
+# =============================================================================
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_spa(path):
+    # API 路由已由蓝图处理，能走到这里说明是前端路由
+    # 直接返回 index.html，由前端 router 处理
+    return render_template('index.html')
 
 
 # =============================================================================

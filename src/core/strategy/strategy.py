@@ -261,7 +261,7 @@ class BollReversionStrategy(BaseStrategy):
         gain = (delta.where(delta > 0, 0)).rolling(window=self.rsi_period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=self.rsi_period).mean()
         rs = gain / loss.replace(0, np.nan)
-        df["rsi"] = (100 - (100 / (1 + rs))).fillna(100)
+        df["rsi"] = (100 - (100 / (1 + rs))).fillna(50)
 
         in_position = False
         start = max(self.period, self.rsi_period)

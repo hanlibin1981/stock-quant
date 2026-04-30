@@ -197,15 +197,19 @@ class TencentFinanceClient:
             records = []
             for kline in klines:
                 if len(kline) >= 6:
-                    records.append({
-                        'date': kline[0],
-                        'open': float(kline[1]),
-                        'close': float(kline[2]),
-                        'high': float(kline[3]),
-                        'low': float(kline[4]),
-                        'volume': float(kline[5]),
-                        'amount': float(kline[6]) if len(kline) > 6 else 0
-                    })
+                    try:
+                        amount_val = float(kline[6]) if len(kline) > 6 and isinstance(kline[6], (int, float, str)) else 0
+                        records.append({
+                            'date': kline[0],
+                            'open': float(kline[1]),
+                            'close': float(kline[2]),
+                            'high': float(kline[3]),
+                            'low': float(kline[4]),
+                            'volume': float(kline[5]),
+                            'amount': amount_val
+                        })
+                    except (ValueError, TypeError):
+                        continue  # 跳过格式异常的K线记录
 
             df = pd.DataFrame(records)
             df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')

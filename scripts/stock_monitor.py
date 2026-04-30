@@ -11,6 +11,7 @@ import json
 import requests
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 # 项目路径（需要最先定义，因为后面的函数需要用到）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +34,7 @@ def _load_env_file():
 _load_env_file()
 
 # 添加项目路径
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SRC_ROOT))
 
 # 飞书配置 - 从环境变量读取
@@ -44,6 +46,9 @@ USER_ID = os.environ.get('FEISHU_USER_ID', '162611g9')
 from watch_stocks import WATCH_LIST
 
 _cached_token = None
+
+# 每只股票最大分析时长（秒）
+PER_STOCK_TIMEOUT = 25
 
 
 def get_token():
@@ -139,15 +144,17 @@ def send_message(token, msg):
     url = "https://open.feishu.cn/open-apis/im/v1/messages"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     params = {"receive_id_type": "user_id"}
-    data = {"receive_id": USER_ID, "msg_type": "text", "content": json.dumps({"text": msg})}
+    # content must be a JSON string, not double-encoded
+    body = {"receive_id": USER_ID, "msg_type": "text", "content": json.dumps({"text": msg})}
     try:
-        resp = requests.post(url, headers=headers, json=data, params=params, timeout=10)
-        return resp.json().get('code') == 0
+        resp = requests.post(url, headers=headers, data=json.dumps(body), params=params, timeout=10)
+        result = resp.json()
+        if result.get('code') == 0:
+            return True
+        print(f"发送消息失败: {result}")
+        return False
     except requests.RequestException as e:
         print(f"发送消息失败: {e}")
-        return False
-    except (ValueError, KeyError) as e:
-        print(f"解析响应失败: {e}")
         return False
 
 
@@ -242,15 +249,35 @@ def main():
         return
 
     signals = []
-    for code, name in WATCH_LIST:
-        s = get_signal(code)
-        if s:
-            s['name'] = name
-            signals.append(s)
-            print(
-                f"{code} {name}: {s['signal']} - {s['reason']} "
-                f"[kline={s.get('kline_source', 'unknown')}, price={s.get('realtime_source', 'unknown')}]"
-            )
+
+    def analyze_one(code_name):
+        code, name = code_name
+        try:
+            s = get_signal(code)
+            if s:
+                s['name'] = name
+                print(
+                    f"{code} {name}: {s['signal']} - {s['reason']} "
+                    f"[kline={s.get('kline_source', 'unknown')}, price={s.get('realtime_source', 'unknown')}]"
+                )
+                return s
+        except Exception as e:
+            print(f"分析 {code} 时出错: {e}")
+        return None
+
+    # 并行分析，每只股票独立超时控制
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(analyze_one, cn): cn for cn in WATCH_LIST}
+        for future in futures:
+            try:
+                result = future.result(timeout=PER_STOCK_TIMEOUT)
+                if result:
+                    signals.append(result)
+            except FuturesTimeoutError:
+                code = futures[future][0]
+                print(f"⚠️ {code} 分析超时（>{PER_STOCK_TIMEOUT}s），已跳过")
+            except Exception as e:
+                print(f"⚠️ 任务执行出错: {e}")
 
     if not signals:
         print("无信号")

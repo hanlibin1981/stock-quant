@@ -45,6 +45,7 @@ def get_signal():
     clients = _clients
     indicator_calc = clients.get('indicator_calc')
     signal_gen = clients.get('signal_generator')
+    eastmoney = clients.get('eastmoney_client')
 
     if not indicator_calc or not signal_gen:
         return jsonify({'success': False, 'error': '信号生成器未初始化'})
@@ -56,7 +57,14 @@ def get_signal():
     df = indicator_calc.calculate(df)
     result = signal_gen.analyze(df)
 
-    price = float(df.iloc[-1]['close']) if len(df) > 0 else 0
+    # 优先取实时价格，兜底用日K收盘价
+    price = 0
+    if eastmoney:
+        rt = eastmoney.get_realtime(code)
+        if rt and rt.get('price', 0) > 0:
+            price = rt['price']
+    if price == 0:
+        price = float(df.iloc[-1]['close']) if len(df) > 0 else 0
 
     return jsonify({
         'success': True,
@@ -143,6 +151,7 @@ def get_monitor_signals():
     clients = _clients
     indicator_calc = clients.get('indicator_calc')
     signal_gen = clients.get('signal_generator')
+    eastmoney = clients.get('eastmoney_client')
 
     if not indicator_calc or not signal_gen:
         return jsonify({'success': False, 'error': '信号生成器未初始化'})
@@ -157,7 +166,14 @@ def get_monitor_signals():
             df = indicator_calc.calculate(df)
             result = signal_gen.analyze(df)
 
-            price = float(df.iloc[-1]['close']) if len(df) > 0 else 0
+            # 优先取实时价格，兜底用日K收盘价
+            price = 0
+            if eastmoney:
+                rt = eastmoney.get_realtime(code)
+                if rt and rt.get('price', 0) > 0:
+                    price = rt['price']
+            if price == 0:
+                price = float(df.iloc[-1]['close']) if len(df) > 0 else 0
 
             signals.append({
                 'code': code,

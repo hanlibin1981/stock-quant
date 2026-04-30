@@ -90,7 +90,7 @@ def send_feishu_message(token, message):
 
 
 def get_stock_signal(code):
-    """获取股票信号 - 多周期验证版"""
+    """获取股票信号 - 增强版多周期验证"""
     from api.eastmoney import EastMoneyClient
     from api.tushare import get_tushare_client
     from api.mock_data import MockDataGenerator
@@ -132,22 +132,16 @@ def get_stock_signal(code):
     if not data_sources:
         return None
 
-    # 多周期分析
-    if len(data_sources) > 1:
-        # 多周期验证
-        result = signal_gen.analyze_multi_period(code, data_sources)
-        # 标记是否为多周期信号
-        is_multi = len(data_sources) > 1
-    else:
-        # 单周期分析
-        df = indicator.calculate(data_sources.get('D', list(data_sources.values())[0]))
-        result = signal_gen.analyze(df)
-        is_multi = False
+    # 多周期验证分析
+    result = signal_gen.analyze_multi_period(code, data_sources)
 
-    # 获取当前价格
+    # 获取实时价格（优先从实时接口获取，其次用日K最后收盘价兜底）
     price = 0
-    if 'D' in data_sources:
-        price = float(data_sources['D'].iloc[-1]['close']) if len(data_sources['D']) > 0 else 0
+    realtime = eastmoney.get_realtime(code)
+    if realtime and realtime.get('price', 0) > 0:
+        price = realtime['price']
+    elif 'D' in data_sources and len(data_sources['D']) > 0:
+        price = float(data_sources['D'].iloc[-1]['close'])
 
     return {
         'code': code,
@@ -155,7 +149,7 @@ def get_stock_signal(code):
         'reason': result.get('reason', ''),
         'strength': result.get('strength', 0),
         'price': price,
-        'is_multi_period': is_multi,
+        'is_multi_period': len(data_sources) > 1,
         'period_results': result.get('period_results', {})
     }
 
