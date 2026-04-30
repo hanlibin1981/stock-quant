@@ -1,6 +1,6 @@
 """
 交易信号模块 - 多周期验证版
-增强信号生成，支持多周期验证
+增强信号生成，支持多周期验证、自适应权重
 """
 
 import pandas as pd
@@ -12,15 +12,25 @@ import threading
 
 # 延迟导入避免循环依赖
 _indicator_calc = None
+_adaptive_engine = None
 
 
 def _get_indicator_calculator():
-    """延迟加载指标计算器"""
+    """"延迟加载指标计算器"""
     global _indicator_calc
     if _indicator_calc is None:
         from src.core.indicator.calculator import IndicatorCalculator
         _indicator_calc = IndicatorCalculator()
     return _indicator_calc
+
+
+def _get_adaptive_engine():
+    """延迟加载自适应权重引擎"""
+    global _adaptive_engine
+    if _adaptive_engine is None:
+        from src.core.signal.adaptive_weight import AdaptiveWeightEngine
+        _adaptive_engine = AdaptiveWeightEngine()
+    return _adaptive_engine
 
 
 @dataclass
@@ -35,11 +45,13 @@ class EnhancedTradeSignal:
 
 
 class SignalGenerator:
-    """增强版信号生成器 - 支持多周期验证"""
+    """增强版信号生成器 - 支持多周期验证、自适应权重"""
 
-    def __init__(self):
+    def __init__(self, use_adaptive_weight: bool = True):
         self.signal_history = []
         self._indicator_calc = None
+        self._adaptive_engine = None
+        self.use_adaptive_weight = use_adaptive_weight
 
     @property
     def indicator_calc(self):
@@ -47,6 +59,13 @@ class SignalGenerator:
         if self._indicator_calc is None:
             self._indicator_calc = _get_indicator_calculator()
         return self._indicator_calc
+    
+    @property
+    def adaptive_engine(self):
+        """延迟加载自适应权重引擎"""
+        if self._adaptive_engine is None:
+            self._adaptive_engine = _get_adaptive_engine()
+        return self._adaptive_engine
     
     def analyze(self, df: pd.DataFrame) -> Dict:
         """
@@ -96,46 +115,57 @@ class SignalGenerator:
         # 获取趋势
         trend = self._get_trend(df)  # 'up', 'down', 'sideways'
         
+        # 获取自适应权重
+        if self.use_adaptive_weight:
+            market_state = self.adaptive_engine.analyze_market_state(df)
+            weights = self.adaptive_engine.get_weights_with_volume(df)
+        else:
+            market_state = None
+            weights = {
+                'macd': 0.2, 'rsi': 0.15, 'kdj': 0.15, 'boll': 0.1,
+                'ma': 0.15, 'cci': 0.08, 'wr': 0.07, 'volume': 0.1
+            }
+        
         signals = []
         
-        # 1. MACD 信号 (权重 0.2)
+        # 1. MACD 信号 (权重 adaptive)
         if 'macd_dif' in df.columns and 'macd_dea' in df.columns:
             macd_signal = self._analyze_macd(df)
-            signals.append({**macd_signal, 'weight': 0.2})
+            signals.append({**macd_signal, 'weight': weights.get('macd', 0.2)})
         
-        # 2. RSI 信号 (权重 0.15)
+        # 2. RSI 信号 (权重 adaptive)
         if 'rsi12' in df.columns:
             rsi_signal = self._analyze_rsi(df)
-            signals.append({**rsi_signal, 'weight': 0.15})
+            signals.append({**rsi_signal, 'weight': weights.get('rsi', 0.15)})
         
-        # 3. KDJ 信号 (权重 0.15)
+        # 3. KDJ 信号 (权重 adaptive)
         if 'kdj_k' in df.columns and 'kdj_d' in df.columns:
             kdj_signal = self._analyze_kdj(df)
-            signals.append({**kdj_signal, 'weight': 0.15})
+            signals.append({**kdj_signal, 'weight': weights.get('kdj', 0.15)})
         
-        # 4. 布林带信号 (权重 0.1)
+        # 4. 布林带信号 (权重 adaptive)
         if 'boll_upper' in df.columns and 'boll_lower' in df.columns:
             boll_signal = self._analyze_boll(df)
-            signals.append({**boll_signal, 'weight': 0.1})
+            signals.append({**boll_signal, 'weight': weights.get('boll', 0.1)})
         
-        # 5. 均线信号 (权重 0.15)
+        # 5. 均线信号 (权重 adaptive)
         if 'ma5' in df.columns and 'ma20' in df.columns:
             ma_signal = self._analyze_ma(df)
-            signals.append({**ma_signal, 'weight': 0.15})
+            signals.append({**ma_signal, 'weight': weights.get('ma', 0.15)})
         
-        # 6. CCI 信号 (权重 0.08)
+        # 6. CCI 信号 (权重 adaptive)
         if 'cci' in df.columns:
             cci_signal = self._analyze_cci(df)
-            signals.append({**cci_signal, 'weight': 0.08})
+            signals.append({**cci_signal, 'weight': weights.get('cci', 0.08)})
         
-        # 7. WR 信号 (权重 0.07)
+        # 7. WR 信号 (权重 adaptive)
         if 'wr6' in df.columns:
             wr_signal = self._analyze_wr(df)
-            signals.append({**wr_signal, 'weight': 0.07})
+            signals.append({**wr_signal, 'weight': weights.get('wr', 0.07)})
         
-        # 8. 成交量验证 (权重 0.1)
+        # 8. 成交量验证 (权重 adaptive)
         volume_signal = self._analyze_volume(df)
-        signals.append({**volume_signal, 'weight': 0.1})
+        signals.append({**volume_signal, 'weight': weights.get('volume', 0.1)})
         
         # 综合判断
         if not signals:
